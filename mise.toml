@@ -1,11 +1,18 @@
 [tools]
 python = "3.14"
 
-[tasks.build]
-description = "Установка зависимостей"
-run = "pip install -r requirements.txt"
+[env]
+_.path = ["./venv/bin"]
+
+[tasks.install]
+description = "Создание venv и установка зависимостей"
+run = [
+    "python -m venv venv",
+    "./venv/bin/pip install --upgrade pip",
+    "./venv/bin/pip install -r requirements.txt"
+]
 
 [tasks.start]
 description = "Запуск проекта"
-depends = ["build"]
+depends = ["install"]
 run = "python main.py"
