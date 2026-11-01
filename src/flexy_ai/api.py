@@ -69,7 +69,7 @@ class FlexyAiAPI:
 
         self.logger.info(f"Задача создана. ID: {task_id}. Ожидание...")
 
-        self._poll_image_result(task_id)
+        return self._poll_image_result(task_id)
 
 
     def context_to_image(self, image_path: str, prompt: str) -> str:

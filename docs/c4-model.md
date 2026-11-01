@@ -101,6 +101,7 @@ flowchart TB
     end
 
     subgraph core["Ядро (src/)"]
+        GEN["🟦 generation — сервис генерации<br/>src/generation.py (ADR-001)"]
         API["🟦 FlexyAiAPI<br/>src/flexy_ai/api.py"]
         REG["🟦 register_user<br/>src/flexy_ai/registration.py"]
         TM["🟦 TempMail<br/>src/temp_mail.py"]
@@ -118,14 +119,14 @@ flowchart TB
     files[("📁 data/generated")]
 
     %% --- контур генерации ---
-    BOT -->|"to_thread(ctx2img)"| DB
-    BOT -->|"login, set_api_key,<br/>context_to_image"| API
+    BOT -->|"to_thread"| GEN
     BOT <-->|"download / answer_photo"| ext_tg
+    GEN -->|"захват аккаунта,<br/>tries, cooldown"| DB
+    GEN -->|"login, set_api_key,<br/>txt2img / context2img"| API
     API -->|"base64 + размеры"| CONV
     API -->|"jpg результат"| SAVE
     SAVE --> files
-    CLI --> DB
-    CLI --> API
+    CLI --> GEN
 
     %% --- контур регистрации ---
     FARM -->|"create_mail,<br/>get_verification_link"| TM
@@ -146,9 +147,10 @@ flowchart TB
 
 | Компонент | Модуль | Ответственность | Используют |
 |---|---|---|---|
-| **run_bot.py** | `scripts/run_bot.py` | Хендлеры aiogram (`/start`, фото). Оркестрация генерации: захват аккаунта из пула → генерация в `asyncio.to_thread` → отправка результата. При rate-limit аккаунт уходит в cooldown, запрос перебирает следующий | DB, FlexyAiAPI |
+| **run_bot.py** | `scripts/run_bot.py` | Хендлеры aiogram (`/start`, фото): скачивание фото под uuid-именем, запуск генерации через сервис в `asyncio.to_thread`, отправка результата | generation |
 | **run_register_accounts.py** | `scripts/run_register_accounts.py` | Ферма аккаунтов: запуск uc-браузера (`setup_driver` фиксирует браузер + версию драйвера), цикл «почта → регистрация → верификация → сохранение в пул» | TempMail, register_user, DB, generate_username |
-| **run_generate_*.py** | `scripts/` | CLI-генерации txt2img / context2img без бота — тот же сценарий, что у бота | DB, FlexyAiAPI |
+| **run_generate_*.py** | `scripts/` | CLI-генерации txt2img / context2img без бота — тонкая обёртка над сервисом | generation |
+| **generation** | `src/generation.py` | Сервис генерации (ADR-001): перебор свободных аккаунтов пула, login, генерация; при rate-limit аккаунт уходит в cooldown, запрос идёт дальше. Единственная реализация сценария для бота и CLI | DB, FlexyAiAPI |
 | **FlexyAiAPI** | `src/flexy_ai/api.py` | HTTP-клиент flexy-ai.com на `requests.Session`: парсинг login-формы, логин, получение токена, `txt2img` / `context2img`, поллинг статуса задачи | parse_files, convert_image, save_base64_image |
 | **register_user** | `src/flexy_ai/registration.py` | Регистрация через `admin-ajax`: получение nonce и form_key, проверка полей, отправка формы. Ошибки почты → `RegistrationEmailError` | parse_files, RegistrationEmailError |
 | **TempMail** | `src/temp_mail.py` | Selenium-клиент temp-mail.org: `create_mail()` (ожидание сгенерированного адреса), `get_verification_link()` (поиск письма и ссылки подтверждения) | webdriver/uc |
@@ -164,11 +166,13 @@ flowchart TB
 **Генерация (пользователь → картинка):**
 
 1. `photo_handler` скачивает фото под uuid-именем и сразу отвечает пользователю
-2. `asyncio.to_thread(ctx2img)` — генерация не блокирует бота
+2. `asyncio.to_thread(generation.context_to_image)` — генерация не блокирует бота
 3. `DB.get_account()` атомарно берёт свободный аккаунт (round-robin по `last_used`)
 4. `FlexyAiAPI.login()` → `set_api_key()` → `context_to_image()` (поллинг статуса ~30 сек)
 5. Ошибка API → `set_account_busy(120с)` → автоматический переход на следующий аккаунт
 6. Успех → `update_account_tries()` → `answer_photo` с результатом
+
+Шаги 3–6 выполняет `src/generation.py` — тот же код используется CLI-генераторами.
 
 **Регистрация аккаунта (ферма):**
 

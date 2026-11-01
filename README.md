@@ -47,6 +47,8 @@ mise run register_accounts -- --counts 5
 │   ├── run_generate_txt2img.py   # CLI: текст → изображение
 │   └── run_generate_ctx2img.py   # CLI: изображение → изображение
 ├── src/
+│   ├── generation.py         # сервис генерации через пул аккаунтов (ADR-001)
+│   ├── config.py             # общие константы (промпт, cooldown)
 │   ├── flexy_ai/
 │   │   ├── api.py            # HTTP-клиент flexy-ai.com (login, txt2img, context2img)
 │   │   └── registration.py   # регистрация аккаунтов через admin-ajax
@@ -58,7 +60,9 @@ mise run register_accounts -- --counts 5
 │   ├── generate_username.py  # генерация логинов
 │   └── errors/               # доменные исключения
 ├── tests/                    # ручные тесты-скрипты
-├── docs/c4-model.md          # архитектура (C4: контекст, контейнеры, компоненты)
+├── docs/
+│   ├── c4-model.md           # архитектура (C4: контекст, контейнеры, компоненты)
+│   └── adr/                  # архитектурные решения (ADR)
 ├── data/                     # база и сгенерированные картинки (в git не входит)
 └── .env                      # секреты (BOT_TOKEN), в git не входит
 ```
