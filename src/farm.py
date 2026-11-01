@@ -7,11 +7,16 @@
 """
 
 import logging
+import platform
 import re
 import shutil
 import subprocess
+import sys
 import time
+import zipfile
+from pathlib import Path
 
+import requests
 import undetected_chromedriver as uc
 
 from src.errors.email_errors import RegistrationEmailError
@@ -25,6 +30,100 @@ logger = logging.getLogger(__name__)
 
 # Пароль для всех регистрируемых аккаунтов
 ACCOUNTS_PASSWORD = "kraken1488"
+
+# Сколько раз пробуем запустить браузер, прежде чем сдаться
+BROWSER_START_ATTEMPTS = 3
+
+# Каталог, где uc хранит пропатченный драйвер
+UC_CACHE_DIR = Path.home() / ".local" / "share" / "undetected_chromedriver"
+# Имя файла по умолчанию, куда uc кладет свежескачанный драйвер
+UC_DEFAULT_PATCHED_NAME = "undetected_chromedriver"
+
+# Chrome for Testing: версии и ссылки на драйверы по мажорным версиям
+CFT_MILESTONES_URL = (
+    "https://googlechromelabs.github.io/chrome-for-testing/"
+    "latest-versions-per-milestone-with-downloads.json"
+)
+
+
+def _cached_driver_path(version_main: int) -> Path:
+    """Путь к нашему версионному кэшу пропатченного драйвера."""
+    return UC_CACHE_DIR / f"{UC_DEFAULT_PATCHED_NAME}_v{version_main}"
+
+
+def _cft_platform() -> str:
+    """Имя платформы в нотации Chrome for Testing."""
+    if sys.platform.startswith("linux"):
+        return "linux64"
+    if sys.platform == "darwin":
+        return "mac-arm64" if platform.machine() == "arm64" else "mac-x64"
+    return "win64" if platform.machine().endswith("64") else "win32"
+
+
+def _download_driver(version_main: int, dst: Path) -> bool:
+    """Скачивает chromedriver нужной мажорной версии и патчит его для uc.
+
+    В отличие от встроенного загрузчика uc — с таймаутами через requests,
+    чтобы при плохой сети падать быстро, а не висеть минутами.
+    Возвращает True, если драйвер готов (скачан и пропатчен).
+    """
+    try:
+        UC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+        resp = requests.get(CFT_MILESTONES_URL, timeout=15)
+        resp.raise_for_status()
+        milestone = resp.json()["milestones"].get(str(version_main))
+        if milestone is None:
+            logger.warning(f"В Chrome for Testing нет версии {version_main}")
+            return False
+
+        downloads = milestone["downloads"]["chromedriver"]
+        url = next(d["url"] for d in downloads if d["platform"] == _cft_platform())
+
+        logger.info(f"Скачиваю chromedriver {milestone['version']}...")
+        zip_path = dst.with_suffix(".zip")
+        with requests.get(url, timeout=(10, 120), stream=True) as r:
+            r.raise_for_status()
+            with open(zip_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 16):
+                    f.write(chunk)
+
+        import tempfile
+
+        with zipfile.ZipFile(zip_path) as zf, tempfile.TemporaryDirectory() as tmp:
+            member = next(
+                n for n in zf.namelist()
+                if n.endswith("/chromedriver") or n == "chromedriver.exe"
+            )
+            zf.extract(member, path=tmp)
+            shutil.move(Path(tmp) / member, dst)
+        zip_path.unlink(missing_ok=True)
+        dst.chmod(0o755)
+
+        # патчим бинарник средствами uc (без скачивания — уже свой путь)
+        patcher = uc.Patcher(executable_path=str(dst), version_main=version_main)
+        patcher.auto()
+
+        logger.info(f"Драйвер готов: {dst}")
+        return True
+    except Exception as e:
+        logger.warning(f"Не удалось скачать драйвер самостоятельно: {e}")
+        return False
+
+
+def _seed_driver_cache(version_main: int) -> None:
+    """Сохраняет свежескачанный uc-драйвер в версионный кэш (best effort).
+
+    Нужен только для fallback-пути, когда драйвер качал сам uc.
+    """
+    try:
+        src = UC_CACHE_DIR / UC_DEFAULT_PATCHED_NAME
+        dst = _cached_driver_path(version_main)
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+            logger.info(f"Драйвер закэширован: {dst}")
+    except OSError as e:
+        logger.debug(f"Не удалось закэшировать драйвер: {e}")
 
 
 def find_browser() -> tuple[str, int] | None:
@@ -51,35 +150,72 @@ def find_browser() -> tuple[str, int] | None:
 
 
 def setup_driver() -> uc.Chrome:
-    while True:
+    """Запускает uc-браузер, переиспользуя закэшированный драйвер.
+
+    uc 3.5.5 сам не сверяет версию браузера и драйвера: без version_main
+    качает последний Stable, а браузер выбирает перебором (может взять
+    Chromium не той версии) -> SessionNotCreated. Поэтому фиксируем оба.
+
+    Пропатченный драйвер кэшируется в версионный файл и переиспользуется
+    через driver_executable_path: uc по умолчанию перекачивает драйвер
+    при каждом запуске через urllib без таймаутов и виснет при плохой сети.
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(1, BROWSER_START_ATTEMPTS + 1):
         try:
-            logger.info("Попытка запуска браузера...")
+            logger.info(f"Попытка запуска браузера ({attempt}/{BROWSER_START_ATTEMPTS})...")
             options = uc.ChromeOptions()
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
 
-            # uc 3.5.5 сам не сверяет версию браузера и драйвера:
-            # без version_main качает последний Stable, а браузер выбирает
-            # перебором (может взять Chromium не той версии) -> SessionNotCreated.
-            # Поэтому фиксируем оба: конкретный бинарник браузера и его версию.
             browser = find_browser()
-            if browser:
-                browser_path, version_main = browser
-                logger.info(f"Браузер: {browser_path} (v{version_main})")
+            if browser is None:
+                # браузер не найден — пусть uc попробует сам
+                return uc.Chrome(options=options, use_subprocess=True)
+
+            browser_path, version_main = browser
+            logger.info(f"Браузер: {browser_path} (v{version_main})")
+
+            cached_driver = _cached_driver_path(version_main)
+            if not cached_driver.exists():
+                # нет кэша — качаем сами через requests (с таймаутами),
+                # встроенный загрузчик uc без таймаутов может висеть минутами
+                _download_driver(version_main, cached_driver)
+
+            if cached_driver.exists():
+                logger.info(f"Использую драйвер: {cached_driver}")
                 return uc.Chrome(
                     options=options,
                     browser_executable_path=browser_path,
                     version_main=version_main,
+                    driver_executable_path=str(cached_driver),
                     use_subprocess=True,
                 )
 
-            # браузер не найден — пусть uc попробует сам
-            return uc.Chrome(options=options, use_subprocess=True)
+            # скачать не удалось — последний шанс: встроенный загрузчик uc
+            logger.warning("Пробую встроенный загрузчик uc (может занять время)...")
+            driver = uc.Chrome(
+                options=options,
+                browser_executable_path=browser_path,
+                version_main=version_main,
+                use_subprocess=True,
+            )
+            _seed_driver_cache(version_main)
+            return driver
 
         except Exception as e:
+            last_error = e
             logger.error(f"Ошибка подключения: {e}")
-            logger.debug("Ждем 5 секунд перед повторной попыткой...")
-            time.sleep(5)
+            if attempt < BROWSER_START_ATTEMPTS:
+                logger.debug("Ждем 5 секунд перед повторной попыткой...")
+                time.sleep(5)
+
+    raise RuntimeError(
+        f"не удалось запустить браузер за {BROWSER_START_ATTEMPTS} попытки: {last_error}\n"
+        "Проверь доступ к googlechromelabs.github.io и storage.googleapis.com "
+        "(сеть/VPN) и что Chrome запускается вручную"
+    )
 
 
 def register_new_account(temp_mail: TempMail) -> tuple[str, str]:

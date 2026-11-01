@@ -78,6 +78,10 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
 5. **Не привязываться к версии chromedriver.** `undetected-chromedriver` сам скачивает
    и патчит драйвер; в `setup_driver()` явно передаются `browser_executable_path` и
    `version_main` (uc сам версии не сверяет — без этого возможен SessionNotCreated).
+   Пропатченный драйвер кэшируется в `~/.local/share/undetected_chromedriver/*_v<major>`:
+   uc 3.5.5 перекачивает драйвер при каждом запуске через urllib без таймаутов
+   (виснет при плохой сети), поэтому при кэш-промахе драйвер качаем сами через
+   `requests` (`src/farm.py::_download_driver`), а uc передаем готовый бинарник.
    Бинарник `chromedriver` в репозитории не нужен (в `.gitignore`).
 
 6. **Уникальные имена файлов** для входящих фото и результатов генерации (`uuid`) —
