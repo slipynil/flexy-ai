@@ -52,6 +52,7 @@ flowchart TB
     admin(["👤 Оператор"])
 
     subgraph system["🟦 flexy_service"]
+        ui["🟦 UI-меню<br/>[rich + questionary]<br/>единый интерактивный вход"]
         tgbot["🟦 Telegram-бот<br/>[aiogram 3]<br/>хендлеры /start и фото,<br/>оркестрация генерации"]
         farm["🟦 Ферма аккаунтов<br/>[selenium + undetected-chromedriver]<br/>регистрация и верификация"]
         cli["🟦 CLI-генераторы<br/>txt2img / ctx2img"]
@@ -63,8 +64,7 @@ flowchart TB
     tempmail["🟥 temp-mail.org"]
     telegram["🟪 Telegram Bot API"]
 
-    user <--> tgbot
-    admin -->|"mise run ..."| farm & cli & tgbot
+    admin -->|"mise run ui / mise run ..."| ui & farm & cli & tgbot
 
     tgbot -->|"round-robin + cooldown"| db
     tgbot -->|"login, context2img, polling"| flexy
@@ -81,8 +81,9 @@ flowchart TB
 
 | Контейнер | Технологии | Ответственность |
 |---|---|---|
+| UI-меню (`scripts/run_ui.py`) | rich, questionary | Единый интерактивный вход: меню запуска бота, генераций, регистрации |
 | Telegram-бот (`scripts/run_bot.py`) | aiogram 3, asyncio | Приём фото, запуск генерации в потоках, отправка результатов |
-| Ферма аккаунтов (`scripts/run_register_accounts.py`) | selenium, undetected-chromedriver | Массовая регистрация аккаунтов и сохранение в пул |
+| Ферма аккаунтов (`src/farm.py`) | selenium, undetected-chromedriver | Регистрация аккаунтов и сохранение в пул (вызывается из CLI и UI) |
 | CLI-генераторы (`scripts/run_generate_*.py`) | requests | Разовые генерации без бота |
 | Пул аккаунтов (`src/repository/sqlite.py`) | SQLite | Хранение аккаунтов, ротация, cooldown, лимиты |
 
@@ -95,13 +96,15 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph entry["Точки входа (scripts/)"]
-        BOT["🟦 run_bot.py<br/>Telegram-бот<br/>photo_handler, ctx2img"]
-        FARM["🟦 run_register_accounts.py<br/>ферма аккаунтов"]
+        UI["🟦 run_ui.py<br/>интерактивное меню<br/>(rich + questionary)"]
+        BOT["🟦 run_bot.py<br/>Telegram-бот<br/>photo_handler"]
+        FARM["🟦 run_register_accounts.py<br/>CLI-обёртка фермы"]
         CLI["🟦 run_generate_*.py<br/>CLI-генераторы"]
     end
 
     subgraph core["Ядро (src/)"]
         GEN["🟦 generation — сервис генерации<br/>src/generation.py (ADR-001)"]
+        FARM_CORE["🟦 farm — ферма регистрации<br/>src/farm.py"]
         API["🟦 FlexyAiAPI<br/>src/flexy_ai/api.py"]
         REG["🟦 register_user<br/>src/flexy_ai/registration.py"]
         TM["🟦 TempMail<br/>src/temp_mail.py"]
@@ -119,6 +122,9 @@ flowchart TB
     files[("📁 data/generated")]
 
     %% --- контур генерации ---
+    UI -->|"запуск бота / генераций"| BOT
+    UI --> GEN
+    UI --> FARM_CORE
     BOT -->|"to_thread"| GEN
     BOT <-->|"download / answer_photo"| ext_tg
     GEN -->|"захват аккаунта,<br/>tries, cooldown"| DB
@@ -129,9 +135,10 @@ flowchart TB
     CLI --> GEN
 
     %% --- контур регистрации ---
-    FARM -->|"create_mail,<br/>get_verification_link"| TM
-    FARM -->|"register_user"| REG
-    FARM -->|"add_account,<br/>update_tries"| DB
+    FARM -->|"argparse + логирование"| FARM_CORE
+    FARM_CORE -->|"create_mail,<br/>get_verification_link"| TM
+    FARM_CORE -->|"register_user"| REG
+    FARM_CORE -->|"add_account"| DB
     TM -->|"selenium / uc"| ext_mail
     REG -->|"nonce, form key"| PARSE
     REG -->|"AJAX формы"| ext_flexy
@@ -147,10 +154,12 @@ flowchart TB
 
 | Компонент | Модуль | Ответственность | Используют |
 |---|---|---|---|
+| **run_ui.py** | `scripts/run_ui.py` | Единое интерактивное меню (ADR-002): запуск бота, генераций, регистрации; валидация ввода, панели и спиннеры rich | generation, farm, run_bot |
 | **run_bot.py** | `scripts/run_bot.py` | Хендлеры aiogram (`/start`, фото): скачивание фото под uuid-именем, запуск генерации через сервис в `asyncio.to_thread`, отправка результата | generation |
-| **run_register_accounts.py** | `scripts/run_register_accounts.py` | Ферма аккаунтов: запуск uc-браузера (`setup_driver` фиксирует браузер + версию драйвера), цикл «почта → регистрация → верификация → сохранение в пул» | TempMail, register_user, DB, generate_username |
+| **run_register_accounts.py** | `scripts/run_register_accounts.py` | CLI-обёртка фермы: argparse + логирование, вызов `farm.register_accounts(count)` | farm |
 | **run_generate_*.py** | `scripts/` | CLI-генерации txt2img / context2img без бота — тонкая обёртка над сервисом | generation |
 | **generation** | `src/generation.py` | Сервис генерации (ADR-001): перебор свободных аккаунтов пула, login, генерация; при rate-limit аккаунт уходит в cooldown, запрос идёт дальше. Единственная реализация сценария для бота и CLI | DB, FlexyAiAPI |
+| **farm** | `src/farm.py` | Ферма регистрации (ADR-001 фаза 2): подбор браузера и uc-драйвера (`setup_driver`), цикл «почта → регистрация → верификация → пул» | TempMail, register_user, DB, generate_username |
 | **FlexyAiAPI** | `src/flexy_ai/api.py` | HTTP-клиент flexy-ai.com на `requests.Session`: парсинг login-формы, логин, получение токена, `txt2img` / `context2img`, поллинг статуса задачи | parse_files, convert_image, save_base64_image |
 | **register_user** | `src/flexy_ai/registration.py` | Регистрация через `admin-ajax`: получение nonce и form_key, проверка полей, отправка формы. Ошибки почты → `RegistrationEmailError` | parse_files, RegistrationEmailError |
 | **TempMail** | `src/temp_mail.py` | Selenium-клиент temp-mail.org: `create_mail()` (ожидание сгенерированного адреса), `get_verification_link()` (поиск письма и ссылки подтверждения) | webdriver/uc |

@@ -31,6 +31,7 @@ mise run register_accounts -- --counts 5
 
 | Команда | Что делает |
 |---|---|
+| `mise run ui` | **Интерактивное меню** — бот, генерации, регистрация (рекомендуется) |
 | `mise run bot` | Запуск телеграм-бота |
 | `mise run register_accounts -- --counts N` | Регистрация N аккаунтов |
 | `mise run generate_txt2img -- --prompt "..."` | Разовая генерация текст→картинка |
@@ -41,13 +42,15 @@ mise run register_accounts -- --counts 5
 ## Структура проекта
 
 ```
-├── scripts/                  # точки входа
+├── scripts/                  # тонкие точки входа
+│   ├── run_ui.py             # интерактивное меню (rich + questionary)
 │   ├── run_bot.py            # телеграм-бот (aiogram)
-│   ├── run_register_accounts.py  # ферма аккаунтов (selenium/uc)
+│   ├── run_register_accounts.py  # ферма аккаунтов: CLI-обёртка над src/farm.py
 │   ├── run_generate_txt2img.py   # CLI: текст → изображение
 │   └── run_generate_ctx2img.py   # CLI: изображение → изображение
 ├── src/
 │   ├── generation.py         # сервис генерации через пул аккаунтов (ADR-001)
+│   ├── farm.py               # ферма регистрации аккаунтов (ADR-001 фаза 2)
 │   ├── config.py             # общие константы (промпт, cooldown)
 │   ├── flexy_ai/
 │   │   ├── api.py            # HTTP-клиент flexy-ai.com (login, txt2img, context2img)

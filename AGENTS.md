@@ -15,6 +15,7 @@
 ## Команды
 
 ```bash
+mise run ui                               # интерактивное меню (бот, генерации, регистрация)
 mise run bot                              # запуск телеграм-бота
 mise run register_accounts -- --counts 5  # регистрация 5 аккаунтов (аргументы после --)
 mise run generate_txt2img -- --prompt "..."   # CLI-генерация
@@ -30,8 +31,9 @@ mise run install                          # poetry install
 ## Структура
 
 ```
-scripts/            # тонкие точки входа (бот, ферма аккаунтов, CLI-генераторы)
+scripts/            # тонкие точки входа (UI-меню, бот, ферма аккаунтов, CLI-генераторы)
 src/generation.py   # сервис генерации через пул аккаунтов (ADR-001)
+src/farm.py         # ферма регистрации аккаунтов (ADR-001 фаза 2, ADR-002)
 src/config.py       # общие константы (DEFAULT_PROMPT, ACCOUNT_COOLDOWN_SECONDS)
 src/flexy_ai/       # HTTP-клиент flexy-ai.com (api.py) и регистрация (registration.py)
 src/repository/     # DB — пул аккаунтов в SQLite
