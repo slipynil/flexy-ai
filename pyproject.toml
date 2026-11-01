@@ -1,0 +1,41 @@
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false
+
+[project]
+name = "flexy_service"
+version = "0.1.0"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "attrs",
+    "certifi",
+    "charset-normalizer",
+    "evdev",
+    "h11",
+    "idna",
+    "outcome",
+    "packaging",
+    "pip-check-reqs",
+    "PySocks",
+    "python-xlib",
+    "requests",
+    "selenium (>=4.52.0,<5.0.0)",
+    "six",
+    "sniffio",
+    "sortedcontainers",
+    "trio",
+    "trio-websocket",
+    "typing_extensions",
+    "undetected-chromedriver (>=3.5.5,<4.0.0)",
+    "urllib3",
+    "websocket-client",
+    "websockets",
+    "wsproto",
+    "pillow (>=12.3.0,<13.0.0)",
+    "aiogram (>=3.30.0,<4.0.0)",
+    "beautifulsoup4 (>=4.15.0,<5.0.0)",
+    "setuptools (>=84.2.1,<85.0.0)",
+]

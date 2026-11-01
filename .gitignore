@@ -5,6 +5,13 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+*.db
+data/
+temp/
+source/
 
 *.log
 .DS_Store
+
+chromedriver

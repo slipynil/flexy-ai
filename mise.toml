@@ -1,18 +1,41 @@
 [tools]
-python = "3.14"
+python = "3.12"
 
 [env]
 _.path = ["./venv/bin"]
 
-[tasks.install]
-description = "Создание venv и установка зависимостей"
+# 1. Создание папок
+[tasks.setup]
+description = "Создание папок для данных"
 run = [
-    "python -m venv venv",
-    "./venv/bin/pip install --upgrade pip",
-    "./venv/bin/pip install -r requirements.txt"
+    "mkdir -p data",
+    "mkdir -p data/generated",
 ]
 
-[tasks.start]
-description = "Запуск проекта"
+# 2. Установка зависимостей через Poetry
+[tasks.install]
+description = "Установка зависимостей из pyproject.toml через Poetry"
+depends = ["setup"]
+sources = ["pyproject.toml", "poetry.lock"]
+outputs = []
+run = "poetry install"
+
+[tasks.generate_txt2img]
+description = "Генерация изображения используйте флаг --prompt"
 depends = ["install"]
-run = "python main.py"
+run = "poetry run python -m scripts.run_generate_txt2img"
+
+[tasks.generate_ctx2img]
+description = "Генерация изображения используйте флаг --imagepath и --prompt (опционально)"
+depends = ["install"]
+run = "poetry run python -m scripts.run_generate_ctx2img"
+
+[tasks.register_accounts]
+description = "Регистрация аккаунта используйте флаг --counts"
+depends = ["install"]
+run = "poetry run python -m scripts.run_register_accounts"
+
+[tasks.bot]
+description = "Запуск телеграм-бота"
+depends = ["install"]
+run = "poetry run python -m scripts.run_bot"
