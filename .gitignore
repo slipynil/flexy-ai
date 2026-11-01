@@ -15,3 +15,6 @@ source/
 .DS_Store
 
 chromedriver
+
+# секреты
+.env

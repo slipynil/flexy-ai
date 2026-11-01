@@ -3,6 +3,7 @@ python = "3.12"
 
 [env]
 _.path = ["./venv/bin"]
+_.file = ".env"
 
 # 1. Создание папок
 [tasks.setup]

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -14,7 +15,8 @@ from aiogram.types.input_file import FSInputFile
 from src.flexy_ai.api import FlexyAiAPI
 from src.repository.sqlite import DB
 
-TOKEN = "8801008513:AAEYF8_1BktjNYq8iBiFKwqBWNmG-H00y5M"
+# Токен берется из окружения: mise загружает его из файла .env (см. .env.example)
+TOKEN = os.environ.get("BOT_TOKEN")
 
 logger = logging.getLogger("KrakenBot")
 
@@ -105,6 +107,12 @@ async def photo_handler(message: Message) -> None:
 
 
 async def main() -> None:
+    if not TOKEN:
+        raise RuntimeError(
+            "BOT_TOKEN не задан. Создайте файл .env (скопируйте .env.example) "
+            "и укажите в нем токен от @BotFather"
+        )
+
     SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 
     bot = Bot(token=TOKEN)
