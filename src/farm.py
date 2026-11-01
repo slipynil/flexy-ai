@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import requests
@@ -150,8 +151,37 @@ def _start_chrome_detached(executable: str, *args: str) -> int:
     return proc.pid
 
 
-# точечная замена launch-функции uc на нашу (без PIPE) — включается один раз
-uc.start_detached = _start_chrome_detached
+@contextmanager
+def uc_launch():
+    """Запуск uc.Chrome с локальным обходом дефекта stderr-пайпа (правило 9).
+
+    На время вызова uc.Chrome подменяет uc.start_detached на версию с DEVNULL
+    и восстанавливает оригинал после. Использовать строго как контекстный
+    менеджер вокруг uc.Chrome — патч не должен жить дольше запуска.
+    """
+    original = uc.start_detached
+    uc.start_detached = _start_chrome_detached
+    try:
+        yield
+    finally:
+        uc.start_detached = original
+
+
+def _launch_uc(
+    options: uc.ChromeOptions,
+    browser_path: str | None = None,
+    version_main: int | None = None,
+    driver_executable_path: str | None = None,
+) -> uc.Chrome:
+    """Единая точка создания uc.Chrome (с локальным обходом дефекта)."""
+    kwargs: dict = {"options": options, "use_subprocess": False}
+    if browser_path:
+        kwargs["browser_executable_path"] = browser_path
+        kwargs["version_main"] = version_main
+    if driver_executable_path:
+        kwargs["driver_executable_path"] = driver_executable_path
+    with uc_launch():
+        return uc.Chrome(**kwargs)
 
 
 def find_browser() -> tuple[str, int] | None:
@@ -200,7 +230,7 @@ def setup_driver() -> uc.Chrome:
             browser = find_browser()
             if browser is None:
                 # браузер не найден — пусть uc попробует сам
-                return uc.Chrome(options=options, use_subprocess=False)
+                return _launch_uc(options)
 
             browser_path, version_main = browser
             logger.info(f"Браузер: {browser_path} (v{version_main})")
@@ -213,22 +243,16 @@ def setup_driver() -> uc.Chrome:
 
             if cached_driver.exists():
                 logger.info(f"Использую драйвер: {cached_driver}")
-                return uc.Chrome(
-                    options=options,
-                    browser_executable_path=browser_path,
+                return _launch_uc(
+                    options,
+                    browser_path=browser_path,
                     version_main=version_main,
                     driver_executable_path=str(cached_driver),
-                    use_subprocess=False,
                 )
 
             # скачать не удалось — последний шанс: встроенный загрузчик uc
             logger.warning("Пробую встроенный загрузчик uc (может занять время)...")
-            driver = uc.Chrome(
-                options=options,
-                browser_executable_path=browser_path,
-                version_main=version_main,
-                use_subprocess=False,
-            )
+            driver = _launch_uc(options, browser_path=browser_path, version_main=version_main)
             _seed_driver_cache(version_main)
             return driver
 
