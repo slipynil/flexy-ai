@@ -37,7 +37,7 @@ mise run register_accounts -- --counts 5
 | `mise run generate_txt2img -- --prompt "..."` | Разовая генерация текст→картинка |
 | `mise run generate_ctx2img -- --imagepath file.jpg` | Разовая генерация картинка→картинка |
 | `mise run setup` | Создать папки `data/` и `data/generated/` |
-| `mise run install` | Установить зависимости (poetry install) |
+| `mise run install` | Пересоздать `./venv` и установить зависимости из `poetry.lock` |
 
 ## Структура проекта
 

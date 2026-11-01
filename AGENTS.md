@@ -24,9 +24,13 @@ mise run install                          # poetry install
 ./venv/bin/python tests/parse_test.py     # ручные тесты-скрипты (не pytest-сьют)
 ```
 
-- Окружение: `./venv` (Python 3.12), зависимости — poetry (`pyproject.toml`, `poetry.lock`)
+- Окружение: `./venv` (Python 3.12) — **единственное**; задачи mise запускают его напрямую
+  (`./venv/bin/python`), `poetry run` не используется: poetry может молча уйти в окружение
+  из `~/.cache/pypoetry/virtualenvs` с другими версиями библиотек. Привязка poetry к `./venv`
+  — через `VIRTUAL_ENV` в задаче `install` (см. `mise.toml`). Зависимости — poetry
+  (`pyproject.toml`, `poetry.lock`)
 - Задачи описаны в `mise.toml` — это источник правды по запуску
-- Скрипты запускаются как модули из корня: `poetry run python -m scripts.run_...`
+- Скрипты запускаются как модули из корня: `./venv/bin/python -m scripts.run_...`
 
 ## Структура
 
@@ -121,8 +125,14 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
   (~64 КБ) замораживает Chrome → сессия падает с `'str' object has no attribute 'get'`
   через ~30 сек (интермитент, зависит от окружения). Обход — запуск uc только через
   `src/farm.py::_launch_uc`: контекстный менеджер `uc_launch` временно подменяет
-  `uc.start_detached` на `_start_chrome_detached` (DEVNULL вместо PIPE) и восстанавливает
-  оригинал. Патч строго локальный (правило 9), не выносить на уровень модуля.
+  `uc.start_detached` на `_start_chrome_detached` (stderr — в файл `data/chrome-logs/`,
+  а не PIPE) и восстанавливает оригинал. Патч строго локальный (правило 9), не выносить
+  на уровень модуля.
+- **Сбой запуска Chrome = `'str' object has no attribute 'get'`**: если Chrome не поднял
+  DevTools-порт за ~30 сек (завис на старте — транзиент: compositor, GPU, загрузка),
+  chromedriver возвращает ошибку, где `value` — строка, и selenium падает в `start_session`
+  с этой малопонятной ошибкой. Диагностика: traceback в логах (exc_info), хвост лога Chrome
+  в ошибке (`data/chrome-logs/`), журнал `journalctl --user`.
 - **Версии chromedriver и браузера**: драйвер новее браузера → `SessionNotCreated`;
   драйвер равный или старше — работает.
 

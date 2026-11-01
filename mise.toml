@@ -13,35 +13,43 @@ run = [
     "mkdir -p data/generated",
 ]
 
-# 2. Установка зависимостей через Poetry
+# 2. Установка зависимостей: единое окружение ./venv (никаких кэшей poetry).
+# VIRTUAL_ENV привязывает poetry к ./venv: без этого poetry может молча
+# создать/выбрать окружение в ~/.cache/pypoetry/virtualenvs — и задачи
+# запустятся с другими версиями библиотек.
 [tasks.install]
-description = "Установка зависимостей из pyproject.toml через Poetry"
+description = "Создание ./venv и установка зависимостей из poetry.lock"
 depends = ["setup"]
 sources = ["pyproject.toml", "poetry.lock"]
-outputs = []
-run = "poetry install"
+outputs = ["venv/pyvenv.cfg"]
+run = [
+    "test -x venv/bin/python || python3.12 -m venv venv",
+    "VIRTUAL_ENV=\"$PWD/venv\" poetry install",
+]
 
+# Запуск всегда через ./venv/bin/python напрямую: poetry run не используется,
+# чтобы исключить выбор другого окружения (см. комментарий в tasks.install)
 [tasks.generate_txt2img]
 description = "Генерация изображения используйте флаг --prompt"
 depends = ["install"]
-run = "poetry run python -m scripts.run_generate_txt2img"
+run = "./venv/bin/python -m scripts.run_generate_txt2img"
 
 [tasks.generate_ctx2img]
 description = "Генерация изображения используйте флаг --imagepath и --prompt (опционально)"
 depends = ["install"]
-run = "poetry run python -m scripts.run_generate_ctx2img"
+run = "./venv/bin/python -m scripts.run_generate_ctx2img"
 
 [tasks.register_accounts]
 description = "Регистрация аккаунта используйте флаг --counts"
 depends = ["install"]
-run = "poetry run python -m scripts.run_register_accounts"
+run = "./venv/bin/python -m scripts.run_register_accounts"
 
 [tasks.bot]
 description = "Запуск телеграм-бота"
 depends = ["install"]
-run = "poetry run python -m scripts.run_bot"
+run = "./venv/bin/python -m scripts.run_bot"
 
 [tasks.ui]
 description = "Интерактивное меню: бот, генерации, регистрация аккаунтов"
 depends = ["install"]
-run = "poetry run python -m scripts.run_ui"
+run = "./venv/bin/python -m scripts.run_ui"

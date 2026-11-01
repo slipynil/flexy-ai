@@ -7,6 +7,7 @@
 """
 
 import logging
+import os
 import platform
 import re
 import shutil
@@ -40,6 +41,15 @@ BROWSER_START_ATTEMPTS = 3
 UC_CACHE_DIR = Path.home() / ".local" / "share" / "undetected_chromedriver"
 # Имя файла по умолчанию, куда uc кладет свежескачанный драйвер
 UC_DEFAULT_PATCHED_NAME = "undetected_chromedriver"
+
+# Логи Chrome: при сбое запуска показываем хвост последнего лога
+CHROME_LOG_DIR = Path("data/chrome-logs")
+CHROME_LOG_LINES = 15
+CHROME_LOG_KEEP = 10
+
+# Сколько раз пробуем получить почту с temp-mail.org на один аккаунт
+# (раньше while True крутился бесконечно, если сайт не отдавал почту)
+MAIL_CREATE_ATTEMPTS = 5
 
 # Chrome for Testing: версии и ссылки на драйверы по мажорным версиям
 CFT_MILESTONES_URL = (
@@ -128,6 +138,31 @@ def _seed_driver_cache(version_main: int) -> None:
         logger.debug(f"Не удалось закэшировать драйвер: {e}")
 
 
+def _new_chrome_log_path() -> Path:
+    """Создает файл для лога Chrome и подчищает старые (держим последние N)."""
+    CHROME_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = CHROME_LOG_DIR / f"chrome_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.log"
+    try:
+        logs = sorted(p for p in CHROME_LOG_DIR.glob("chrome_*.log"))
+        for old in logs[:-CHROME_LOG_KEEP]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return log_path
+
+
+def _chrome_log_tail() -> str:
+    """Хвост самого свежего лога Chrome — для диагностики сбоя запуска."""
+    try:
+        logs = sorted(CHROME_LOG_DIR.glob("chrome_*.log"))
+        if not logs:
+            return ""
+        lines = logs[-1].read_text(errors="replace").splitlines()
+        return "\n".join(lines[-CHROME_LOG_LINES:])
+    except OSError:
+        return ""
+
+
 def _start_chrome_detached(executable: str, *args: str) -> int:
     """Замена uc.start_detached (используется при use_subprocess=False).
 
@@ -136,16 +171,19 @@ def _start_chrome_detached(executable: str, *args: str) -> int:
     переполняется, Chrome замирает на записи — chromedriver ~30 сек ждет
     DevTools-порт, и сессия падает с 'str' object has no attribute 'get'.
 
-    Эта версия запускает Chrome с DEVNULL (писать некуда — зависнуть невозможно)
-    и возвращает pid напрямую, как и ожидает uc.
+    Эта версия направляет stderr Chrome в файл лога (data/chrome-logs/):
+    пайп не переполняется, а при сбое запуска лог можно показать пользователю.
+    Возвращает pid напрямую, как и ожидает uc.
     """
-    proc = subprocess.Popen(
-        [executable, *args],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    # файл закрываем сразу после Popen: ребенок получил свою копию дескриптора
+    with open(_new_chrome_log_path(), "ab") as chrome_log:
+        proc = subprocess.Popen(
+            [executable, *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=chrome_log,
+            start_new_session=True,
+        )
     # паритет с оригиналом: uc держит реестр pid'ов для очистки при выходе
     dprocess.REGISTERED.append(proc.pid)
     return proc.pid
@@ -261,14 +299,18 @@ def setup_driver() -> uc.Chrome:
             # exc_info: без traceback ('str' object has no attribute 'get' и т.п.)
             # невозможно понять, где именно упало
             logger.error(f"Ошибка подключения: {e}", exc_info=True)
+            # хвост лога Chrome: что происходило в браузере перед сбоем
+            tail = _chrome_log_tail()
+            if tail:
+                logger.error(f"Последние строки лога Chrome ({CHROME_LOG_DIR}):\n{tail}")
             if attempt < BROWSER_START_ATTEMPTS:
                 logger.debug("Ждем 5 секунд перед повторной попыткой...")
                 time.sleep(5)
 
     raise RuntimeError(
         f"не удалось запустить браузер за {BROWSER_START_ATTEMPTS} попытки: {last_error}\n"
-        "Проверь доступ к googlechromelabs.github.io и storage.googleapis.com "
-        "(сеть/VPN) и что Chrome запускается вручную"
+        "Логи Chrome — в data/chrome-logs/. Проверь, что Chrome запускается вручную,\n"
+        "и доступ к googlechromelabs.github.io / storage.googleapis.com (сеть/VPN)"
     )
 
 
@@ -276,12 +318,16 @@ def register_new_account(temp_mail: TempMail) -> tuple[str, str]:
     """Генерирует почту и регистрирует аккаунт на сайте, возвращает (mail, password)."""
     password = ACCOUNTS_PASSWORD
 
-    while True:
+    # temp-mail.org флапает (Cloudflare, медленная доставка) — ретраи ограничены,
+    # раньше while True мог крутиться бесконечно
+    for mail_attempt in range(1, MAIL_CREATE_ATTEMPTS + 1):
         try:
             # 1. создаем почту в temp-mail.org
             mail = temp_mail.create_mail()
             if mail is None:
-                logger.error("Ошибка регистрации: mail is None")
+                logger.error(
+                    f"Почта не получена (попытка {mail_attempt}/{MAIL_CREATE_ATTEMPTS})"
+                )
                 continue
 
             username = generate_random_username()
@@ -298,6 +344,10 @@ def register_new_account(temp_mail: TempMail) -> tuple[str, str]:
         except Exception as e:
             logger.error(f"Непредвиденная ошибка: {e}", exc_info=True)
             raise
+
+    raise RuntimeError(
+        f"не удалось получить почту с temp-mail.org за {MAIL_CREATE_ATTEMPTS} попыток"
+    )
 
 
 def verify_and_get_api_key(temp_mail: TempMail, mail: str, password: str) -> str | None:
