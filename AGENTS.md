@@ -104,8 +104,9 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
 - **uc + stderr Chrome**: uc запускает Chrome с `stderr=PIPE` и никогда не читает его,
   при этом добавляет Chrome `--log-level=0` (болтливый). Переполнение буфера пайпа
   (~64 КБ) замораживает Chrome → сессия падает с `'str' object has no attribute 'get'`
-  через ~30 сек (интермитент, зависит от окружения). Обход —
-  `src/farm.py::chrome_stderr_to_devnull`, не убирать.
+  через ~30 сек (интермитент, зависит от окружения). Обход — ферма всегда
+  запускает uc с `use_subprocess=False`, а `uc.start_detached` заменён на
+  `src/farm.py::_start_chrome_detached` (DEVNULL вместо PIPE), не убирать.
 - **Версии chromedriver и браузера**: драйвер новее браузера → `SessionNotCreated`;
   драйвер равный или старше — работает.
 
