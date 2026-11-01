@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import requests
@@ -126,6 +127,33 @@ def _seed_driver_cache(version_main: int) -> None:
         logger.debug(f"Не удалось закэшировать драйвер: {e}")
 
 
+@contextmanager
+def chrome_stderr_to_devnull(browser_binary: str):
+    """uc запускает Chrome с stderr=subprocess.PIPE и никогда не читает его.
+
+    Chrome при этом получает --log-level=0 (максимальная болтливость), и когда
+    буфер пайпа (~64 КБ) переполняется, Chrome замирает на записи в stderr —
+    chromedriver ~30 сек ждет DevTools-порт и сессия отваливается с
+    'str' object has no attribute 'get'. Известный дефект uc 3.5.5.
+
+    Обход: на время создания uc.Chrome подменяем Popen — stderr/stdout Chrome
+    уходят в DEVNULL, писать больше некуда, зависнуть невозможно.
+    """
+    original_popen = subprocess.Popen
+
+    def patched_popen(args, *popen_args, **popen_kwargs):
+        if args and str(args[0]) == browser_binary:
+            popen_kwargs["stderr"] = subprocess.DEVNULL
+            popen_kwargs["stdout"] = subprocess.DEVNULL
+        return original_popen(args, *popen_args, **popen_kwargs)
+
+    subprocess.Popen = patched_popen
+    try:
+        yield
+    finally:
+        subprocess.Popen = original_popen
+
+
 def find_browser() -> tuple[str, int] | None:
     """Находит установленный Chrome/Chromium.
 
@@ -185,22 +213,24 @@ def setup_driver() -> uc.Chrome:
 
             if cached_driver.exists():
                 logger.info(f"Использую драйвер: {cached_driver}")
-                return uc.Chrome(
-                    options=options,
-                    browser_executable_path=browser_path,
-                    version_main=version_main,
-                    driver_executable_path=str(cached_driver),
-                    use_subprocess=True,
-                )
+                with chrome_stderr_to_devnull(browser_path):
+                    return uc.Chrome(
+                        options=options,
+                        browser_executable_path=browser_path,
+                        version_main=version_main,
+                        driver_executable_path=str(cached_driver),
+                        use_subprocess=True,
+                    )
 
             # скачать не удалось — последний шанс: встроенный загрузчик uc
             logger.warning("Пробую встроенный загрузчик uc (может занять время)...")
-            driver = uc.Chrome(
-                options=options,
-                browser_executable_path=browser_path,
-                version_main=version_main,
-                use_subprocess=True,
-            )
+            with chrome_stderr_to_devnull(browser_path):
+                driver = uc.Chrome(
+                    options=options,
+                    browser_executable_path=browser_path,
+                    version_main=version_main,
+                    use_subprocess=True,
+                )
             _seed_driver_cache(version_main)
             return driver
 

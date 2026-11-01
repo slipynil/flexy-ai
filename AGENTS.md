@@ -101,6 +101,11 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
 - **Rate-limit**: API блокирует аккаунт на 1–2 минуты при частых запросах → cooldown.
 - **temp-mail.org** за Cloudflare — работает только через undetected-chromedriver,
   headless-режим палится.
+- **uc + stderr Chrome**: uc запускает Chrome с `stderr=PIPE` и никогда не читает его,
+  при этом добавляет Chrome `--log-level=0` (болтливый). Переполнение буфера пайпа
+  (~64 КБ) замораживает Chrome → сессия падает с `'str' object has no attribute 'get'`
+  через ~30 сек (интермитент, зависит от окружения). Обход —
+  `src/farm.py::chrome_stderr_to_devnull`, не убирать.
 - **Версии chromedriver и браузера**: драйвер новее браузера → `SessionNotCreated`;
   драйвер равный или старше — работает.
 
