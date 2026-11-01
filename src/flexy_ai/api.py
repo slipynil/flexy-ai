@@ -33,15 +33,37 @@ class FlexyAiAPI:
 
     def _post_ajax(self, referer: str, payload: dict) -> dict:
         self.session.headers.update({"Referer": referer})
-        response = self.session.post(f"{API_BASE_URL}/wp-admin/admin-ajax.php", data=payload)
+        response = self.session.post(
+            f"{API_BASE_URL}/wp-admin/admin-ajax.php", data=payload, timeout=30
+        )
 
         if not response.ok:
-            raise RuntimeError(f"сервер вернул ошибку {response.status_code}: {response.text}")
+            raise RuntimeError(f"сервер вернул ошибку {response.status_code}: {response.text[:200]}")
 
         try:
-            return response.json()
+            data = response.json()
         except ValueError:
-            raise RuntimeError(f"сервер вернул не JSON: {response.text}")
+            # без входа / при срабатывании анти-бота хостинга приходит HTML
+            raise RuntimeError(f"сервер вернул не JSON: {response.text[:200]}")
+
+        if not isinstance(data, dict):
+            # admin-ajax иногда отвечает голой JSON-строкой — .get() на ней
+            # и ронял все с "'str' object has no attribute 'get'"
+            raise RuntimeError(f"сервер вернул неожиданный JSON: {str(data)[:200]}")
+        return data
+
+    @staticmethod
+    def _data_dict(data: dict) -> dict:
+        """Достает вложенное поле "data", гарантируя dict.
+
+        При ошибках flexy-ai кладет в "data" строку — .get() на ней падал
+        с "'str' object has no attribute 'get'". Теперь вместо краша —
+        RuntimeError с телом ответа.
+        """
+        value = data.get("data", {})
+        if not isinstance(value, dict):
+            raise RuntimeError(f"неожиданный формат ответа (data — не словарь): {str(data)[:300]}")
+        return value
 
     def text_to_image(self, prompt: str) -> dict | None:
         if not self.session.headers.get("X-API-Key"):
@@ -58,14 +80,16 @@ class FlexyAiAPI:
         }
 
         url = f"{API_BASE_URL}/api/txt2img"
-        response = self.session.post(url, json=payload)
+        response = self.session.post(url, json=payload, timeout=60)
         if not response.ok:
             raise RuntimeError(f"Ошибка генерации {response.status_code}: {response.text}")
 
         data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"неожиданный ответ генерации: {str(data)[:200]}")
         task_id = data.get("task_id")
         if not task_id:
-            raise RuntimeError(f"Не удалось запустить генерацию. Ответ: {data}")
+            raise RuntimeError(f"Не удалось запустить генерацию. Ответ: {str(data)[:300]}")
 
         self.logger.info(f"Задача создана. ID: {task_id}. Ожидание...")
 
@@ -87,12 +111,16 @@ class FlexyAiAPI:
             "style": "", "swf": "", "context_images": [image_base64]
         }
         url = f"{API_BASE_URL}/api/context2img"
-        response = self.session.post(url, json=payload)
+        response = self.session.post(url, json=payload, timeout=120)
         if not response.ok:
             raise RuntimeError(f"Ошибка генерации {response.status_code}: {response.text}")
 
         data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"неожиданный ответ генерации: {str(data)[:200]}")
         task_id = data.get("task_id")
+        if not task_id:
+            raise RuntimeError(f"Не удалось запустить генерацию. Ответ: {str(data)[:300]}")
 
         return self._poll_image_result(task_id)
 
@@ -101,7 +129,10 @@ class FlexyAiAPI:
 
         while True:
             time.sleep(2)
-            status_data = self.session.get(url).json()
+            status_data = self.session.get(url, timeout=30).json()
+
+            if not isinstance(status_data, dict):
+                raise RuntimeError(f"неожиданный ответ статуса: {str(status_data)[:200]}")
 
             status = status_data.get("status")
             progress = status_data.get("progress", 0)
@@ -136,16 +167,16 @@ class FlexyAiAPI:
 
     def _get_user_token(self) -> str:
         data = self._post_ajax("https://flexy-ai.com/profile", { "action": "flexy_get_user_profile_data" })
-        token = data.get("data", {}).get("user_token")
+        token = self._data_dict(data).get("user_token")
         if not token:
-            raise RuntimeError("не удалось получить токен")
+            raise RuntimeError(f"в ответе нет user_token (вход не выполнен?): {str(data)[:300]}")
         return token
 
     def _create_api_key(self) -> str:
         data = self._post_ajax("https://flexy-ai.com/profile", { "action": "flexy_generate_api_key" })
-        api_key = data.get("data", {}).get("api_key")
+        api_key = self._data_dict(data).get("api_key")
         if not api_key:
-            raise RuntimeError("не удалось получить API-ключ")
+            raise RuntimeError(f"не удалось получить API-ключ: {str(data)[:300]}")
         return api_key
 
     def _login_user(self, login, password, undefined, arm_nonce_check):
@@ -161,7 +192,11 @@ class FlexyAiAPI:
             "": undefined,
             "arm_nonce_check": arm_nonce_check,
         }
-        self._post_ajax("https://flexy-ai.com/wp-admin/admin-ajax.php", payload)
+        data = self._post_ajax("https://flexy-ai.com/wp-admin/admin-ajax.php", payload)
+        # раньше ответ не проверялся: "вход выполнен успешно" печатался всегда,
+        # а фактический провал всплывал позже на получении токена малопонятной ошибкой
+        if data.get("status") != "success":
+            raise RuntimeError(f"вход не выполнен: {str(data)[:300]}")
         self.logger.info("вход выполнен успешно.")
 
 def _parse_login_html(r: requests.Response):

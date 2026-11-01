@@ -65,7 +65,12 @@ def get_initial_tokens(session: requests.Session, headers: dict):
     try:
         data = response.json()
     except Exception as e:
-        logger.error(f"Сервер не вернул JSON! Статус: {response.status_code}. Ответ: {response.text}")
+        logger.error(f"Сервер не вернул JSON! Статус: {response.status_code}. Ответ: {response.text[:200]}")
+        return None, None
+
+    if not isinstance(data, dict):
+        # при сбое может прийти голая JSON-строка — .items()/.get() на ней падают
+        logger.error(f"Сервер вернул неожиданный ответ: {str(data)[:200]}")
         return None, None
 
     # Безопасно достаем динамический ключ для 101 формы (пробуем из ответа, иначе берем из словаря)
@@ -135,6 +140,11 @@ def register_user(login, email, password):
         data = response.json()
     except ValueError:
         raise RuntimeError(f"Сервер вернул не JSON: {response.text[:200]}")
+
+    # admin-ajax/ARMember может ответить голой JSON-строкой: .get() на ней
+    # ронял регистрацию с "'str' object has no attribute 'get'"
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Сервер вернул неожиданный ответ: {str(data)[:200]}")
 
     if data.get("status") == "error":
         raw_message = data.get("message", "Неизвестная ошибка")

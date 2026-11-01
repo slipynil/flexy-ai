@@ -107,6 +107,12 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
 - **flexy-ai.com** — WordPress с плагином ARMember. Для login/регистрации нужно парсить
   скрытые поля формы (`arm_wp_nonce`, `arm_nonce_check`, безымянное числовое `undefined`)
   из HTML — см. `src/parse_files.py`. Поля/структура формы могут меняться.
+- **flexy-ai.com: ответы admin-ajax непостоянны.** При сбойном входе или срабатывании
+  анти-бота хостинга (beget) вместо JSON приходит HTML, а поле `data` в JSON может быть
+  строкой. Любой `.get()` по такому ответу без isinstance-проверки падает с
+  `'str' object has no attribute 'get'`. Парсинг ответов — только через
+  `FlexyAiAPI._post_ajax` + `_data_dict` (проверяют форму и дают RuntimeError с телом
+  ответа). Вход/токен флапают — `verify_and_get_api_key` повторяет вход обычным логином.
 - **Rate-limit**: API блокирует аккаунт на 1–2 минуты при частых запросах → cooldown.
 - **temp-mail.org** за Cloudflare — работает только через undetected-chromedriver,
   headless-режим палится.

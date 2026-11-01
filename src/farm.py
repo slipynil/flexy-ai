@@ -258,7 +258,9 @@ def setup_driver() -> uc.Chrome:
 
         except Exception as e:
             last_error = e
-            logger.error(f"Ошибка подключения: {e}")
+            # exc_info: без traceback ('str' object has no attribute 'get' и т.п.)
+            # невозможно понять, где именно упало
+            logger.error(f"Ошибка подключения: {e}", exc_info=True)
             if attempt < BROWSER_START_ATTEMPTS:
                 logger.debug("Ждем 5 секунд перед повторной попыткой...")
                 time.sleep(5)
@@ -294,7 +296,7 @@ def register_new_account(temp_mail: TempMail) -> tuple[str, str]:
             logger.error(f"Ошибка регистрации: {e}")
             continue
         except Exception as e:
-            logger.error(f"Непредвиденная ошибка: {e}")
+            logger.error(f"Непредвиденная ошибка: {e}", exc_info=True)
             raise
 
 
@@ -310,16 +312,23 @@ def verify_and_get_api_key(temp_mail: TempMail, mail: str, password: str) -> str
     logger.debug(f"password: {password}")
 
     flexy_ai = FlexyAiAPI()
-    try:
-        token = flexy_ai.verification_and_login(
-            verification_link=verification_link,
-            login=mail,
-            password=password,
-        )
-    except (ValueError, RuntimeError) as e:
-        logger.error(f"Ошибка верификации: {e}")
-        return None
-    return mail + ":" + token
+    # вход и получение токена флапают (анти-бот хостинга, одноразовые nonce):
+    # делаем одну повторную попытку обычным логином, без ссылки верификации
+    for attempt in (1, 2):
+        try:
+            if attempt == 1:
+                token = flexy_ai.verification_and_login(
+                    verification_link=verification_link,
+                    login=mail,
+                    password=password,
+                )
+            else:
+                logger.warning("Повторная попытка входа обычным логином...")
+                token = flexy_ai.login(mail, password)
+            return mail + ":" + token
+        except (ValueError, RuntimeError) as e:
+            logger.error(f"Ошибка верификации (попытка {attempt}/2): {e}")
+    return None
 
 
 def register_accounts(count: int) -> int:
