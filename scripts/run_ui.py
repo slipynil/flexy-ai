@@ -24,6 +24,7 @@ from rich.table import Table
 from src.config import DEFAULT_PROMPT
 from src.farm import register_accounts
 from src.generation import context_to_image, text_to_image
+from src.repository.sqlite import DB
 
 console = Console()
 
@@ -40,6 +41,7 @@ MENU_BOT = "🤖 Запустить Telegram-бота"
 MENU_TXT2IMG = "📝 Генерация: текст → изображение"
 MENU_CTX2IMG = "🖼️  Генерация: изображение → изображение"
 MENU_REGISTER = "👥 Регистрация аккаунтов"
+MENU_POOL_STATS = "📊 Пул аккаунтов: доступные и попытки"
 MENU_EXIT = "🚪 Выход"
 
 
@@ -155,11 +157,32 @@ def register_menu() -> None:
         show_error(f"Зарегистрировано только {registered} из {count} — смотри логи выше")
 
 
+def pool_stats_menu() -> None:
+    """Показывает статистику пула: доступные аккаунты и попытки суммарно."""
+    db = DB()
+    try:
+        stats = db.get_pool_stats()
+    finally:
+        db.close()
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column(justify="right")
+    table.add_row("Доступные аккаунты", f"[green]{stats['available']}[/green]")
+    table.add_row("— в cooldown", f"[yellow]{stats['busy']}[/yellow]")
+    table.add_row("— исчерпаны (попыток нет)", f"[dim]{stats['exhausted']}[/dim]")
+    table.add_row("Всего аккаунтов", str(stats["total"]))
+    table.add_row("Попыток суммарно (доступные)", f"[green]{stats['tries_available']}[/green]")
+    table.add_row("Попыток суммарно (все)", str(stats["tries_total"]))
+    console.print(Panel(table, title="👥 Пул аккаунтов", border_style="cyan"))
+
+
 ACTIONS = {
     MENU_BOT: run_bot_menu,
     MENU_TXT2IMG: txt2img_menu,
     MENU_CTX2IMG: ctx2img_menu,
     MENU_REGISTER: register_menu,
+    MENU_POOL_STATS: pool_stats_menu,
 }
 
 

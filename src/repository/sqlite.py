@@ -89,6 +89,48 @@ class DB:
         finally:
             conn.close()
 
+    def get_pool_stats(self) -> dict[str, int]:
+        """Статистика пула аккаунтов (для UI).
+
+        Доступный аккаунт = tries > 0 и не в cooldown — та же семантика,
+        что и в get_account(). Возвращает словарь:
+        - total — всего аккаунтов;
+        - available — доступные сейчас;
+        - busy — в cooldown (rate-limit);
+        - exhausted — исчерпанные (tries <= 0);
+        - tries_available — суммарно попыток у доступных;
+        - tries_total — суммарно попыток у всех аккаунтов.
+        """
+        now = time.time()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    COALESCE(SUM(tries > 0 AND (busy_until IS NULL OR busy_until <= :now)), 0),
+                    COALESCE(SUM(busy_until IS NOT NULL AND busy_until > :now), 0),
+                    COALESCE(SUM(tries <= 0), 0),
+                    COALESCE(SUM(CASE
+                        WHEN tries > 0 AND (busy_until IS NULL OR busy_until <= :now)
+                        THEN tries END), 0),
+                    COALESCE(SUM(tries), 0)
+                FROM accounts
+                """,
+                {"now": now},
+            ).fetchone()
+            total, available, busy, exhausted, tries_available, tries_total = row
+            return {
+                "total": total,
+                "available": available,
+                "busy": busy,
+                "exhausted": exhausted,
+                "tries_available": tries_available,
+                "tries_total": tries_total,
+            }
+        finally:
+            conn.close()
+
     def update_account_tries(self, api_key):
         """Обновление количества попыток для аккаунта"""
         conn = self._connect()

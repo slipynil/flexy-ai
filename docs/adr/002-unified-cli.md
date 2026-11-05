@@ -41,6 +41,7 @@ mise run generate_ctx2img -- --imagepath f.jpg
 | 📝 Генерация: текст → изображение | ввод промпта → `generation.text_to_image` |
 | 🖼️ Генерация: изображение → изображение | ввод пути к файлу (с валидацией) и промпта → `generation.context_to_image` |
 | 👥 Регистрация аккаунтов | ввод количества → `farm.register_accounts(count)` |
+| 📊 Пул аккаунтов: доступные и попытки | статистика пула (read-only) → `repository.DB.get_pool_stats()` |
 
 ## Рассмотренные альтернативы
 

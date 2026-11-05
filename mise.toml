@@ -50,6 +50,6 @@ depends = ["install"]
 run = "./venv/bin/python -m scripts.run_bot"
 
 [tasks.ui]
-description = "Интерактивное меню: бот, генерации, регистрация аккаунтов"
+description = "Интерактивное меню: бот, генерации, регистрация аккаунтов, статистика пула"
 depends = ["install"]
 run = "./venv/bin/python -m scripts.run_ui"

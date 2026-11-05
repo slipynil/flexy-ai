@@ -56,6 +56,14 @@ async def photo_handler(message: Message) -> None:
     except RuntimeError as e:
         await message.answer(f"Не получилось сгенерировать изображение: {e}")
         return
+    except Exception:
+        # страховка: при любой непредвиденной ошибке отвечаем пользователю,
+        # а не оставляем его в ожидании после «Принял! Генерирую…»
+        logger.exception("непредвиденная ошибка генерации")
+        await message.answer(
+            "Не получилось сгенерировать изображение, попробуйте позже"
+        )
+        return
     finally:
         photo_path.unlink(missing_ok=True)
 
