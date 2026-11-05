@@ -18,6 +18,7 @@
 mise run ui                               # интерактивное меню (бот, генерации, регистрация)
 mise run bot                              # запуск телеграм-бота
 mise run register_accounts -- --counts 5  # регистрация 5 аккаунтов (аргументы после --)
+mise run register_accounts_no_email -- --counts 5  # то же без почты и браузера (ADR-003)
 mise run generate_txt2img -- --prompt "..."   # CLI-генерация
 mise run generate_ctx2img -- --imagepath f.jpg
 mise run install                          # poetry install
@@ -108,6 +109,30 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
 
 ## Известные особенности внешних систем
 
+- **flexy-ai.com восстановлен после кибератаки на Beget (11.2026) из бэкапа на
+  техническом домене** (`*.tw1.ru`, видно в referral_url форм). Следствия:
+  - **API генерации переехал на `https://api.flexyai.ru`** (в api.py —
+    `GENERATION_API_BASE_URL`; сайт задает его в inline-скрипте
+    `window.flexyApiUrl`). Старый путь `flexy-ai.com/api/*` отвечает 302 на
+    главную. Формат X-API-Key `mail:user_token` прежний.
+  - **Формы ARMember стали динамическими**: arm_action теперь `please-signup` /
+    `please-login` (старые транслит-экшены не существуют — сервер отвечал
+    «success» без создания сессии, отсюда был `logged_in: False`); ключи форм
+    per-render, дефолты протухли. Поля парсим со страницы:
+    `parse_files.get_arm_form_fields` (форма по составу полей, не по классам),
+    `registration.reinit_forms` + `form_random_id` + `reinit_key_for`.
+  - **Анти-бот сабмита форм**: payload должен повторять arm_form_ajax_action
+    (arm_common.js): `form_random_key` = data-random-id формы (101_/102_),
+    обязательны `form_filter_st` (таймстемп рендера со страницы) и
+    `form_filter_kp`, honeypot `arm_filter_input` НЕ отправляется,
+    8-символьный ключ reinit — имя обязательного пустого поля. Сабмит раньше
+    ~10 сек с загрузки страницы отклоняется («Обнаружен спам») —
+    `ARM_FORM_FILL_DELAY_SECONDS` в config.py дозасыпает остаток.
+  - **«Обнаружен спам» на входе флапает** (то пускает, то нет) —
+    `_login_user` бросает `LoginFlapError`, вызывающий код ретраит вход
+    с новой страницей (`generation._login_with_retry`).
+  - Часы сервера ~4 часа впереди локальных: не сравнивать `stime` со
+    `time.time()` — только передавать как есть.
 - **flexy-ai.com** — WordPress с плагином ARMember. Для login/регистрации нужно парсить
   скрытые поля формы (`arm_wp_nonce`, `arm_nonce_check`, безымянное числовое `undefined`)
   из HTML — см. `src/parse_files.py`. Поля/структура формы могут меняться.

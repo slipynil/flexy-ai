@@ -19,16 +19,18 @@ flowchart TB
 
     telegram["🟪 Telegram Bot API"]
     flexy["🟥 flexy-ai.com<br/>сервис генерации изображений"]
+    genapi["🟥 api.flexyai.ru<br/>API генерации (txt2img/context2img)"]
     tempmail["🟥 temp-mail.org<br/>одноразовая почта (за Cloudflare)"]
 
     user -->|"фото + /start"| system
     system -->|"сгенерированное изображение"| user
 
-    admin -->|"mise run register_accounts --counts N"| system
+    admin -->|"mise run register_accounts[_no_email] --counts N"| system
     admin -->|"mise run bot"| system
 
     system -->|"Bot API (sendPhoto, download)"| telegram
-    system -->|"admin-ajax: регистрация, login,<br/>REST: txt2img / context2img / status"| flexy
+    system -->|"admin-ajax: регистрация, login"| flexy
+    system -->|"REST: txt2img / context2img / status<br/>X-API-Key: mail:token"| genapi
     system -->|"создание почты, чтение писем<br/>(undetected-chromedriver)"| tempmail
 ```
 
@@ -37,8 +39,9 @@ flowchart TB
 | Пользователь Telegram | Отправляет фото, получает результат генерации |
 | Оператор | Запускает бота и ферму регистрации аккаунтов через `mise` |
 | Telegram Bot API | Доставка сообщений и фото |
-| flexy-ai.com | Внешний сервис генерации (WordPress + плагин ARMember) |
-| temp-mail.org | Одноразовые почтовые ящики для регистрации |
+| flexy-ai.com | Внешний сервис (WordPress + ARMember): регистрация и вход |
+| api.flexyai.ru | API генерации изображений (переехал с flexy-ai.com после инцидента, ADR-003) |
+| temp-mail.org | Одноразовые почтовые ящики для старого пути регистрации |
 
 ---
 
@@ -99,6 +102,7 @@ flowchart TB
         UI["🟦 run_ui.py<br/>интерактивное меню<br/>(rich + questionary)"]
         BOT["🟦 run_bot.py<br/>Telegram-бот<br/>photo_handler"]
         FARM["🟦 run_register_accounts.py<br/>CLI-обёртка фермы"]
+        FARM2["🟦 run_register_accounts_no_email.py<br/>CLI: регистрация без почты<br/>(ADR-003)"]
         CLI["🟦 run_generate_*.py<br/>CLI-генераторы"]
     end
 
@@ -116,7 +120,8 @@ flowchart TB
         ERR["🟦 RegistrationEmailError<br/>src/errors/email_errors.py"]
     end
 
-    ext_flexy["🟥 flexy-ai.com<br/>(admin-ajax, REST API)"]
+    ext_flexy["🟥 flexy-ai.com<br/>(admin-ajax: формы ARMember)"]
+    ext_gen["🟥 api.flexyai.ru<br/>(REST API генерации)"]
     ext_mail["🟥 temp-mail.org<br/>(Cloudflare)"]
     ext_tg["🟪 Telegram Bot API"]
     files[("📁 data/generated")]
@@ -136,9 +141,11 @@ flowchart TB
 
     %% --- контур регистрации ---
     FARM -->|"argparse + логирование"| FARM_CORE
+    FARM2 -->|"argparse + логирование"| FARM_CORE
     FARM_CORE -->|"create_mail,<br/>get_verification_link"| TM
     FARM_CORE -->|"register_user"| REG
-    FARM_CORE -->|"add_account"| DB
+    FARM_CORE -->|"login (без верификации, ADR-003)"| API
+    FARM_CORE -->|"add_account / clear_accounts"| DB
     TM -->|"selenium / uc"| ext_mail
     REG -->|"nonce, form key"| PARSE
     REG -->|"AJAX формы"| ext_flexy
@@ -147,20 +154,22 @@ flowchart TB
 
     %% --- общие зависимости API ---
     API -->|"парсинг полей login-формы"| PARSE
-    API -->|"admin-ajax + REST"| ext_flexy
+    API -->|"admin-ajax: login, токен"| ext_flexy
+    API -->|"REST: txt2img / context2img / status"| ext_gen
 ```
 
 ### Компоненты
 
 | Компонент | Модуль | Ответственность | Используют |
 |---|---|---|---|
-| **run_ui.py** | `scripts/run_ui.py` | Единое интерактивное меню (ADR-002): запуск бота, генераций, регистрации; валидация ввода, панели и спиннеры rich | generation, farm, run_bot |
+| **run_ui.py** | `scripts/run_ui.py` | Единое интерактивное меню (ADR-002): запуск бота, генераций, регистрации, статистика пула; валидация ввода, панели и спиннеры rich | generation, farm, run_bot, repository |
 | **run_bot.py** | `scripts/run_bot.py` | Хендлеры aiogram (`/start`, фото): скачивание фото под uuid-именем, запуск генерации через сервис в `asyncio.to_thread`, отправка результата | generation |
 | **run_register_accounts.py** | `scripts/run_register_accounts.py` | CLI-обёртка фермы: argparse + логирование, вызов `farm.register_accounts(count)` | farm |
+| **run_register_accounts_no_email.py** | `scripts/run_register_accounts_no_email.py` | CLI регистрации без почты (ADR-003): argparse + вызов `farm.register_accounts_no_email(count)` | farm |
 | **run_generate_*.py** | `scripts/` | CLI-генерации txt2img / context2img без бота — тонкая обёртка над сервисом | generation |
 | **generation** | `src/generation.py` | Сервис генерации (ADR-001): перебор свободных аккаунтов пула, login, генерация; при rate-limit аккаунт уходит в cooldown, запрос идёт дальше. Единственная реализация сценария для бота и CLI | DB, FlexyAiAPI |
-| **farm** | `src/farm.py` | Ферма регистрации (ADR-001 фаза 2): подбор браузера и uc-драйвера (`setup_driver`), цикл «почта → регистрация → верификация → пул» | TempMail, register_user, DB, generate_username |
-| **FlexyAiAPI** | `src/flexy_ai/api.py` | HTTP-клиент flexy-ai.com на `requests.Session`: парсинг login-формы, логин, получение токена, `txt2img` / `context2img`, поллинг статуса задачи | parse_files, convert_image, save_base64_image |
+| **farm** | `src/farm.py` | Ферма регистрации (ADR-001 фаза 2): два пути — temp-mail (ADR-002: подбор браузера и uc-драйвера, цикл «почта → регистрация → верификация → пул») и без почты (ADR-003: случайный email → регистрация → login → пул, без браузера) | TempMail, register_user, FlexyAiAPI, DB, generate_username |
+| **FlexyAiAPI** | `src/flexy_ai/api.py` | HTTP-клиент flexy-ai.com на `requests.Session`: парсинг login-формы, логин, получение токена, `txt2img` / `context2img` через api.flexyai.ru, поллинг статуса задачи | parse_files, convert_image, save_base64_image, registration (reinit форм) |
 | **register_user** | `src/flexy_ai/registration.py` | Регистрация через `admin-ajax`: получение nonce и form_key, проверка полей, отправка формы. Ошибки почты → `RegistrationEmailError` | parse_files, RegistrationEmailError |
 | **TempMail** | `src/temp_mail.py` | Selenium-клиент temp-mail.org: `create_mail()` (ожидание сгенерированного адреса), `get_verification_link()` (поиск письма и ссылки подтверждения) | webdriver/uc |
 | **DB** | `src/repository/sqlite.py` | Пул аккаунтов в SQLite. Потокобезопасен (соединение на вызов). `get_account()` — атомарный захват наименее недавно использованного свободного аккаунта; `set_account_busy()` — cooldown; `update_account_tries()` — списание генераций. Автомиграция схемы | — |
@@ -183,10 +192,19 @@ flowchart TB
 
 Шаги 3–6 выполняет `src/generation.py` — тот же код используется CLI-генераторами.
 
-**Регистрация аккаунта (ферма):**
+**Регистрация аккаунта (ферма, temp-mail):**
 
 1. `setup_driver()` — uc подбирает согласованные браузер + драйвер
 2. `TempMail.create_mail()` — одноразовая почта на temp-mail.org
 3. `register_user()` — AJAX-регистрация с nonce/form_key
 4. `TempMail.get_verification_link()` → `FlexyAiAPI.verification_and_login()` → токен
 5. `DB.add_account(api_key, email, password)` — аккаунт в пуле с `tries=3`
+
+**Регистрация без почты (ADR-003):**
+
+1. `generate_random_email()` — случайный адрес (домены из `RANDOM_EMAIL_DOMAINS`)
+2. `register_user()` — AJAX-регистрация с полями актуальной формы и анти-ботом
+   ARMember (form_random_key = data-random-id, form_filter_st/kp, пауза
+   `ARM_FORM_FILL_DELAY_SECONDS`)
+3. `FlexyAiAPI.login()` сразу после регистрации (верификация почты отключена)
+4. `DB.add_account("{mail}:{token}", email, password)` — аккаунт в пуле с `tries=3`

@@ -9,6 +9,7 @@
 - ⏳ **Cooldown** — при rate-limit со стороны API аккаунт исключается из ротации на 2 минуты, запрос автоматически уходит на следующий
 - 🧵 **Параллельная генерация** — генерация выполняется в отдельных потоках, бот не блокируется
 - 🏭 **Ферма аккаунтов** — авто-регистрация на flexy-ai.com с одноразовой почтой temp-mail.org (через undetected-chromedriver, обходит Cloudflare)
+- 👤 **Регистрация без почты (ADR-003)** — pure requests, без браузера: сервис больше не проверяет email
 - 💾 **Пул аккаунтов в SQLite** — лимиты генераций (tries), cooldown, потокобезопасный доступ
 
 ## Быстрый старт
@@ -33,7 +34,8 @@ mise run register_accounts -- --counts 5
 |---|---|
 | `mise run ui` | **Интерактивное меню** — бот, генерации, регистрация (рекомендуется) |
 | `mise run bot` | Запуск телеграм-бота |
-| `mise run register_accounts -- --counts N` | Регистрация N аккаунтов |
+| `mise run register_accounts -- --counts N` | Регистрация N аккаунтов (temp-mail + браузер) |
+| `mise run register_accounts_no_email -- --counts N` | Регистрация N аккаунтов без почты и браузера (ADR-003) |
 | `mise run generate_txt2img -- --prompt "..."` | Разовая генерация текст→картинка |
 | `mise run generate_ctx2img -- --imagepath file.jpg` | Разовая генерация картинка→картинка |
 | `mise run setup` | Создать папки `data/` и `data/generated/` |
@@ -46,12 +48,13 @@ mise run register_accounts -- --counts 5
 │   ├── run_ui.py             # интерактивное меню (rich + questionary)
 │   ├── run_bot.py            # телеграм-бот (aiogram)
 │   ├── run_register_accounts.py  # ферма аккаунтов: CLI-обёртка над src/farm.py
+│   ├── run_register_accounts_no_email.py  # регистрация без почты (ADR-003)
 │   ├── run_generate_txt2img.py   # CLI: текст → изображение
 │   └── run_generate_ctx2img.py   # CLI: изображение → изображение
 ├── src/
 │   ├── generation.py         # сервис генерации через пул аккаунтов (ADR-001)
 │   ├── farm.py               # ферма регистрации аккаунтов (ADR-001 фаза 2)
-│   ├── config.py             # общие константы (промпт, cooldown)
+│   ├── config.py             # общие константы (промпт, cooldown, таймауты)
 │   ├── flexy_ai/
 │   │   ├── api.py            # HTTP-клиент flexy-ai.com (login, txt2img, context2img)
 │   │   └── registration.py   # регистрация аккаунтов через admin-ajax
