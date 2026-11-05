@@ -4,6 +4,55 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+
+def get_arm_form_fields(response_text: str, *, login_form: bool) -> dict:
+    """Поля формы ARMember из HTML: значения инпутов по именам.
+
+    После восстановления хостинга flexy-ai.com поля форм стали другими или
+    динамическими (arm_action: please-signup / please-login, referral_url —
+    технический домен Beget, undefined — timestamp рендера), поэтому поля
+    парсим со страницы вместо хардкода.
+
+    Форму выбираем по составу полей, а не по классам/текстам action
+    (локализация и id форм меняются от версии к версии):
+    - login_form=True: форма входа — есть user_pass, нет user_email;
+    - login_form=False: форма регистрации — есть user_email.
+
+    Безымянное числовое скрытое поле (то самое «undefined») попадает
+    в результат под ключом "undefined".
+    """
+    soup = BeautifulSoup(response_text, "html.parser")
+
+    form = None
+    for candidate in soup.find_all("form"):
+        names = {inp.get("name") for inp in candidate.find_all("input")}
+        if login_form and "user_pass" in names and "user_email" not in names:
+            form = candidate
+            break
+        if not login_form and "user_email" in names:
+            form = candidate
+            break
+
+    if form is None:
+        kind = "входа (user_pass без user_email)" if login_form else "регистрации (user_email)"
+        raise ValueError(f"Форма {kind} на странице не найдена")
+
+    fields: dict[str, str] = {}
+    for inp in form.find_all("input"):
+        name = inp.get("name")
+        value = inp.get("value", "")
+        if name:
+            # setdefault: первые инпуты — «визуальные» копии, значения
+            # скрытых обычно совпадают, берем первое вхождение
+            fields.setdefault(name, value)
+        elif (
+            inp.get("type") == "hidden"
+            and inp.get("id") is None
+            and str(value).isdigit()
+        ):
+            fields.setdefault("undefined", value)
+    return fields
+
 def get_arm_wp_nonce(response_text: str) -> str:
     """Парсит форму главной страницы и возвращает найденное скрытое поле: arm_nonce_check."""
     soup = BeautifulSoup(response_text, 'html.parser')

@@ -22,7 +22,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.config import DEFAULT_PROMPT
-from src.farm import register_accounts
+from src.farm import register_accounts, register_accounts_no_email
 from src.generation import context_to_image, text_to_image
 from src.repository.sqlite import DB
 
@@ -41,7 +41,9 @@ MENU_BOT = "🤖 Запустить Telegram-бота"
 MENU_TXT2IMG = "📝 Генерация: текст → изображение"
 MENU_CTX2IMG = "🖼️  Генерация: изображение → изображение"
 MENU_REGISTER = "👥 Регистрация аккаунтов"
+MENU_REGISTER_NO_EMAIL = "👤 Регистрация аккаунтов (без почты)"
 MENU_POOL_STATS = "📊 Пул аккаунтов: доступные и попытки"
+MENU_CLEAR_POOL = "🗑️ Очистить пул аккаунтов"
 MENU_EXIT = "🚪 Выход"
 
 
@@ -157,6 +159,66 @@ def register_menu() -> None:
         show_error(f"Зарегистрировано только {registered} из {count} — смотри логи выше")
 
 
+def register_no_email_menu() -> None:
+    """Регистрация без подтверждения почты (ADR-003): без temp-mail и браузера."""
+    raw = questionary.text(
+        "Сколько аккаунтов зарегистрировать:",
+        default="1",
+        style=CUSTOM_STYLE,
+        validate=lambda v: True if v.isdigit() and int(v) > 0 else "Введите положительное число",
+    ).ask()
+    if not raw:
+        return
+
+    count = int(raw)
+    console.print(Panel(
+        "Регистрация без браузера: случайная почта, подтверждение не требуется (ADR-003).\n"
+        "Прервать: [bold]Ctrl+C[/bold]",
+        border_style="cyan",
+    ))
+
+    try:
+        registered = register_accounts_no_email(count)
+    except KeyboardInterrupt:
+        show_error("Регистрация прервана пользователем")
+        return
+    except Exception as e:
+        show_error(f"Регистрация упала: {e}")
+        return
+
+    if registered == count:
+        show_success("Регистрация завершена", {"Зарегистрировано": f"{registered} из {count}"})
+    else:
+        show_error(f"Зарегистрировано только {registered} из {count} — смотри логи выше")
+
+
+def clear_pool_menu() -> None:
+    """Удаляет все аккаунты из пула (утилизация мёртвых, ADR-003)."""
+    db = DB()
+    try:
+        total = db.get_pool_stats()["total"]
+    finally:
+        db.close()
+
+    if total == 0:
+        console.print(Panel("Пул и так пуст", border_style="yellow"))
+        return
+
+    confirmed = questionary.confirm(
+        f"Удалить все {total} аккаунтов из пула? Это необратимо.",
+        style=CUSTOM_STYLE,
+    ).ask()
+    if not confirmed:
+        return
+
+    db = DB()
+    try:
+        deleted = db.clear_accounts()
+    finally:
+        db.close()
+    show_success("Пул очищен", {"Удалено аккаунтов": str(deleted)})
+
+
 def pool_stats_menu() -> None:
     """Показывает статистику пула: доступные аккаунты и попытки суммарно."""
     db = DB()
@@ -182,7 +244,9 @@ ACTIONS = {
     MENU_TXT2IMG: txt2img_menu,
     MENU_CTX2IMG: ctx2img_menu,
     MENU_REGISTER: register_menu,
+    MENU_REGISTER_NO_EMAIL: register_no_email_menu,
     MENU_POOL_STATS: pool_stats_menu,
+    MENU_CLEAR_POOL: clear_pool_menu,
 }
 
 
@@ -202,7 +266,8 @@ def main() -> None:
             "Интерактивное меню требует терминала.\n"
             "Запустите [bold cyan]mise run ui[/bold cyan] в консоли\n"
             "или используйте задачи: [bold]bot[/bold], [bold]generate_txt2img[/bold], "
-            "[bold]generate_ctx2img[/bold], [bold]register_accounts[/bold]",
+            "[bold]generate_ctx2img[/bold], [bold]register_accounts[/bold], "
+            "[bold]register_accounts_no_email[/bold]",
             title="ℹ️  Нет интерактивного терминала",
             border_style="yellow",
         ))

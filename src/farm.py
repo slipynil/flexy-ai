@@ -1,7 +1,13 @@
-"""Ферма регистрации аккаунтов flexy-ai.com (ADR-001 фаза 2, ADR-002).
+"""Ферма регистрации аккаунтов flexy-ai.com (ADR-001 фаза 2, ADR-002, ADR-003).
 
 Раньше логика жила в scripts/run_register_accounts.py; переехала в src/,
 чтобы её можно было вызывать и из CLI, и из UI-меню.
+
+Два пути регистрации:
+- через temp-mail.org (ADR-002): старый путь, нужен пока сервис требует
+  подтверждение почты;
+- без почты (ADR-003): register_accounts_no_email — верификация отключена,
+  pure requests, без браузера.
 
 Все функции блокирующие (selenium + requests): вызывать из потоков.
 """
@@ -22,10 +28,12 @@ import requests
 import undetected_chromedriver as uc
 from undetected_chromedriver import dprocess
 
+from src.config import LOGIN_ATTEMPTS, NO_EMAIL_REGISTER_ATTEMPTS
+from src.errors.api_errors import LoginFlapError
 from src.errors.email_errors import RegistrationEmailError
 from src.flexy_ai.api import FlexyAiAPI
 from src.flexy_ai.registration import register_user
-from src.generate_username import generate_random_username
+from src.generate_username import generate_random_email, generate_random_username
 from src.repository.sqlite import DB
 from src.temp_mail import TempMail
 
@@ -406,6 +414,90 @@ def register_accounts(count: int) -> int:
 
     finally:
         driver.quit()
+        db.close()
+
+    return registered
+
+
+# --- Регистрация без подтверждения почты (ADR-003) ---
+
+
+def register_account_no_email() -> tuple[str, str, str] | None:
+    """Регистрирует один аккаунт со случайной почтой, без temp-mail (ADR-003).
+
+    Проверка email на flexy-ai.com отключена: письмо не приходит, аккаунт
+    полноценный сразу после формы. При коллизии/отказе формы генерируется
+    новый адрес — до NO_EMAIL_REGISTER_ATTEMPTS попыток.
+
+    Возвращает (api_key, mail, password) или None, если попытки исчерпаны.
+    Сетевые и прочие непредвиденные ошибки пробрасываются наверх: они
+    одинаково повторятся на следующем аккаунте — пусть решает вызывающий.
+    """
+    for attempt in range(1, NO_EMAIL_REGISTER_ATTEMPTS + 1):
+        mail = generate_random_email()
+        username = generate_random_username()
+        logger.info(
+            f"Регистрация без почты (попытка {attempt}/{NO_EMAIL_REGISTER_ATTEMPTS}): {mail}"
+        )
+
+        try:
+            registered = register_user(login=username, email=mail, password=ACCOUNTS_PASSWORD)
+        except RegistrationEmailError as e:
+            # коллизия email или осмысленный отказ формы — пробуем другой адрес
+            logger.warning(f"Регистрация отклонена, пробую другой адрес: {e}")
+            continue
+        if registered is not True:
+            # форма не отправлена (не получены токены/форма) — логин бессмыслен,
+            # пробуем следующий адрес
+            continue
+
+        # верификация не нужна — сразу входим и забираем токен;
+        # вход/токен флапают, поэтому одна повторная попытка (как в
+        # verify_and_get_api_key)
+        api = FlexyAiAPI()
+        token = None
+        for login_attempt in range(1, LOGIN_ATTEMPTS + 1):
+            try:
+                token = api.login(mail, ACCOUNTS_PASSWORD)
+                break
+            except LoginFlapError as e:
+                if login_attempt >= LOGIN_ATTEMPTS:
+                    logger.warning(f"вход после регистрации не удался ({mail}): {e}")
+                    break
+                logger.warning(
+                    f"токен не выдан (попытка {login_attempt}/{LOGIN_ATTEMPTS}), "
+                    f"повторный вход {mail}: {e}"
+                )
+        if not token:
+            continue
+
+        # формат ключа — как у существующего пула (см. verify_and_get_api_key)
+        return f"{mail}:{token}", mail, ACCOUNTS_PASSWORD
+
+    return None
+
+
+def register_accounts_no_email(count: int) -> int:
+    """Регистрирует count аккаунтов со случайной почтой и сохраняет в пул.
+
+    Без temp-mail и браузера: pure requests (ADR-003).
+    Возвращает количество успешно зарегистрированных.
+    """
+    db = DB("./data/data.db")
+    registered = 0
+
+    try:
+        for i in range(count):
+            account = register_account_no_email()
+            if account is None:
+                logger.error("Аккаунт не зарегистрирован, прерываем")
+                break
+
+            api_key, mail, password = account
+            db.add_account(api_key, mail, password)
+            registered += 1
+            logger.info(f"Аккаунт №{i + 1} зарегистрирован и сохранен: {mail}")
+    finally:
         db.close()
 
     return registered

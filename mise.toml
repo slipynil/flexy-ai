@@ -44,6 +44,12 @@ description = "Регистрация аккаунта используйте ф
 depends = ["install"]
 run = "./venv/bin/python -m scripts.run_register_accounts"
 
+# Регистрация без подтверждения почты (ADR-003): без temp-mail и браузера
+[tasks.register_accounts_no_email]
+description = "Регистрация аккаунтов без подтверждения почты используйте флаг --counts"
+depends = ["install"]
+run = "./venv/bin/python -m scripts.run_register_accounts_no_email"
+
 [tasks.bot]
 description = "Запуск телеграм-бота"
 depends = ["install"]

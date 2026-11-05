@@ -143,6 +143,19 @@ class DB:
         finally:
             conn.close()
 
+    def clear_accounts(self) -> int:
+        """Удаляет все аккаунты из пула (ADR-003: утилизация мёртвых).
+
+        Возвращает число удаленных строк.
+        """
+        conn = self._connect()
+        try:
+            cursor = conn.execute("DELETE FROM accounts")
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
     def set_account_busy(self, api_key, seconds=120):
         """Временно исключить аккаунт из ротации (rate-limit со стороны API)."""
         conn = self._connect()
