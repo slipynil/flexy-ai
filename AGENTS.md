@@ -39,6 +39,7 @@ mise run install                          # poetry install
 scripts/            # тонкие точки входа (UI-меню, бот, ферма аккаунтов, CLI-генераторы)
 src/generation.py   # сервис генерации через пул аккаунтов (ADR-001)
 src/farm.py         # ферма регистрации аккаунтов (ADR-001 фаза 2, ADR-002)
+src/waf_session.py  # WAF-сессия: обход челленджа SafeLine, куки для requests (ADR-004)
 src/config.py       # общие константы (DEFAULT_PROMPT, ACCOUNT_COOLDOWN_SECONDS)
 src/flexy_ai/       # HTTP-клиент flexy-ai.com (api.py) и регистрация (registration.py)
 src/repository/     # DB — пул аккаунтов в SQLite
@@ -109,6 +110,19 @@ data/data.db        # SQLite (в git не входит, схема мигрир�
 
 ## Известные особенности внешних систем
 
+- **flexy-ai.com с 07.11.2026 за SafeLine WAF (ADR-004)**: любые клиенты без
+  браузера (requests/curl, любой UA — даже Googlebot) получают нестандартный
+  **HTTP 468** + JS-челлендж. Челлендж детектит CDP-автоматизацию
+  (devtools-detector: getter-объекты в console.log сериализуются из-за
+  Runtime.enable у chromedriver; timing `new Function('debugger')`) и
+  требует isTrusted-события. Обход — `src/waf_session.py`: uc-браузер с
+  контр-инъекцией до загрузки страницы проходит челлендж сам (~5 сек), куки
+  (`sl_jwt_*` и др.) переносятся в requests.Session и работают. Все HTTP к
+  flexy-ai.com идут через `waf_request()` (ленивое обновление при 468,
+  ретрай один раз, шторм-гард на запуск браузера). API генерации
+  `api.flexyai.ru` WAF'ом не закрыт. Сервер снова требует подтверждение
+  email при входе («Перед входом подтвердите свои данные на почте») —
+  основной путь регистрации снова temp-mail (ADR-002).
 - **flexy-ai.com восстановлен после кибератаки на Beget (11.2026) из бэкапа на
   техническом домене** (`*.tw1.ru`, видно в referral_url форм). Следствия:
   - **API генерации переехал на `https://api.flexyai.ru`** (в api.py —

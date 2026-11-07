@@ -54,6 +54,7 @@ mise run register_accounts -- --counts 5
 ├── src/
 │   ├── generation.py         # сервис генерации через пул аккаунтов (ADR-001)
 │   ├── farm.py               # ферма регистрации аккаунтов (ADR-001 фаза 2)
+│   ├── waf_session.py        # WAF-сессия: обход челленджа SafeLine (ADR-004)
 │   ├── config.py             # общие константы (промпт, cooldown, таймауты)
 │   ├── flexy_ai/
 │   │   ├── api.py            # HTTP-клиент flexy-ai.com (login, txt2img, context2img)
