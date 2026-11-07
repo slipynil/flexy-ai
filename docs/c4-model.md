@@ -109,6 +109,7 @@ flowchart TB
     subgraph core["Ядро (src/)"]
         GEN["🟦 generation — сервис генерации<br/>src/generation.py (ADR-001)"]
         FARM_CORE["🟦 farm — ферма регистрации<br/>src/farm.py"]
+        WAF["🟦 waf_session — WAF-сессия SafeLine<br/>src/waf_session.py (ADR-004)"]
         API["🟦 FlexyAiAPI<br/>src/flexy_ai/api.py"]
         REG["🟦 register_user<br/>src/flexy_ai/registration.py"]
         TM["🟦 TempMail<br/>src/temp_mail.py"]
@@ -169,8 +170,9 @@ flowchart TB
 | **run_generate_*.py** | `scripts/` | CLI-генерации txt2img / context2img без бота — тонкая обёртка над сервисом | generation |
 | **generation** | `src/generation.py` | Сервис генерации (ADR-001): перебор свободных аккаунтов пула, login, генерация; при rate-limit аккаунт уходит в cooldown, запрос идёт дальше. Единственная реализация сценария для бота и CLI | DB, FlexyAiAPI |
 | **farm** | `src/farm.py` | Ферма регистрации (ADR-001 фаза 2): два пути — temp-mail (ADR-002: подбор браузера и uc-драйвера, цикл «почта → регистрация → верификация → пул») и без почты (ADR-003: случайный email → регистрация → login → пул, без браузера) | TempMail, register_user, FlexyAiAPI, DB, generate_username |
-| **FlexyAiAPI** | `src/flexy_ai/api.py` | HTTP-клиент flexy-ai.com на `requests.Session`: парсинг login-формы, логин, получение токена, `txt2img` / `context2img` через api.flexyai.ru, поллинг статуса задачи | parse_files, convert_image, save_base64_image, registration (reinit форм) |
-| **register_user** | `src/flexy_ai/registration.py` | Регистрация через `admin-ajax`: получение nonce и form_key, проверка полей, отправка формы. Ошибки почты → `RegistrationEmailError` | parse_files, RegistrationEmailError |
+| **FlexyAiAPI** | `src/flexy_ai/api.py` | HTTP-клиент flexy-ai.com на `requests.Session`: парсинг login-формы, логин, получение токена, `txt2img` / `context2img` через api.flexyai.ru, поллинг статуса задачи. Обмен с сайтом — через `waf_request` | parse_files, convert_image, save_base64_image, registration (reinit форм), waf_session |
+| **register_user** | `src/flexy_ai/registration.py` | Регистрация через `admin-ajax`: получение nonce и form_key, проверка полей, отправка формы. Ошибки почты → `RegistrationEmailError`. Обмен — через `waf_request` | parse_files, RegistrationEmailError, waf_session |
+| **waf_session** | `src/waf_session.py` | WAF-сессия (ADR-004): проход челленджа SafeLine в uc-браузере с контр-инъекцией, кэш кук на процесс, `waf_request()` — запросы с авто-обновлением при HTTP 468 (один ретрай, шторм-гард) | farm (setup_driver), WafBlockedError |
 | **TempMail** | `src/temp_mail.py` | Selenium-клиент temp-mail.org: `create_mail()` (ожидание сгенерированного адреса), `get_verification_link()` (поиск письма и ссылки подтверждения) | webdriver/uc |
 | **DB** | `src/repository/sqlite.py` | Пул аккаунтов в SQLite. Потокобезопасен (соединение на вызов). `get_account()` — атомарный захват наименее недавно использованного свободного аккаунта; `set_account_busy()` — cooldown; `update_account_tries()` — списание генераций. Автомиграция схемы | — |
 | **parse_files** | `src/parse_files.py` | BeautifulSoup-парсинг скрытых полей форм ARMember: `arm_wp_nonce`, `arm_nonce_check`, безымянное числовое поле | — |

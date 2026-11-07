@@ -18,6 +18,7 @@ from src.errors.api_errors import LoginFlapError
 from src.flexy_ai.registration import form_random_id, reinit_forms, reinit_key_for
 from src.parse_files import get_arm_form_fields
 from src.save_base64_image import save_base64_image
+from src.waf_session import waf_request
 
 API_BASE_URL = "https://flexy-ai.com"
 
@@ -39,8 +40,10 @@ HEADERS = {
 
 
 class FlexyAiAPI:
-    def __init__(self):
-        self.session = requests.session()
+    def __init__(self, session: requests.Session | None = None):
+        # session можно передать снаружи (например, с WAF-куками); по умолчанию
+        # куки добавляет waf_request лениво при первом 468 (ADR-004)
+        self.session = session or requests.session()
         self.session.headers.update(HEADERS)
         self.logger = logging.getLogger(__name__)
 
@@ -49,9 +52,9 @@ class FlexyAiAPI:
 
     def _post_ajax(self, referer: str, payload: dict) -> dict:
         self.session.headers.update({"Referer": referer})
-        response = self.session.post(
-            f"{API_BASE_URL}/wp-admin/admin-ajax.php", data=payload,
-            timeout=(HTTP_CONNECT_TIMEOUT, 30),
+        response = waf_request(
+            self.session, "POST", f"{API_BASE_URL}/wp-admin/admin-ajax.php",
+            data=payload, timeout=(HTTP_CONNECT_TIMEOUT, 30),
         )
 
         if not response.ok:
@@ -204,7 +207,10 @@ class FlexyAiAPI:
         # timeout обязателен: хостинг иногда не сбрасывает, а подвешивает
         # соединение — без таймаута поток генерации висит бесконечно
         started = time.monotonic()
-        response = self.session.get(f"{API_BASE_URL}/login", timeout=(HTTP_CONNECT_TIMEOUT, 30))
+        response = waf_request(
+            self.session, "GET", f"{API_BASE_URL}/login",
+            timeout=(HTTP_CONNECT_TIMEOUT, 30),
+        )
         fields = _parse_login_form(response)
         keys = self._login_submit_keys(response.text)
         _sleep_to_fill_delay(started)
@@ -214,8 +220,9 @@ class FlexyAiAPI:
 
     def verification_and_login(self, *, verification_link, login, password) -> str:
         started = time.monotonic()
-        response = self.session.get(
-            verification_link, timeout=(HTTP_CONNECT_TIMEOUT, 30)
+        response = waf_request(
+            self.session, "GET", verification_link,
+            timeout=(HTTP_CONNECT_TIMEOUT, 30),
         )
         if not response.ok:
             raise RuntimeError(f"Верификация не удалась: {response.status_code}")

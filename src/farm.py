@@ -340,11 +340,19 @@ def register_new_account(temp_mail: TempMail) -> tuple[str, str]:
 
             username = generate_random_username()
             # 2. регистрируем пользователя в flexy.ai
-            register_user(
+            registered = register_user(
                 login=username,
                 email=mail,
                 password=password,
             )
+            if registered is not True:
+                # раньше результат игнорировался и флоу зависал на ожидании
+                # письма для несуществующего аккаунта
+                logger.error(
+                    f"Регистрация не выполнена (попытка {mail_attempt}/{MAIL_CREATE_ATTEMPTS}) "
+                    "— письмо ждать бессмысленно, пробуем другую почту"
+                )
+                continue
             return mail, password
         except RegistrationEmailError as e:
             logger.error(f"Ошибка регистрации: {e}")
@@ -468,6 +476,18 @@ def register_account_no_email() -> tuple[str, str, str] | None:
                     f"токен не выдан (попытка {login_attempt}/{LOGIN_ATTEMPTS}), "
                     f"повторный вход {mail}: {e}"
                 )
+            except RuntimeError as e:
+                # flexy-ai.com снова требует подтверждение email (возвращено
+                # 07.11.2026): аккаунт со случайной почтой не войдет никогда,
+                # ретраи с новыми адресами бессмысленны (ADR-004)
+                if "подтвердите" in str(e):
+                    raise RuntimeError(
+                        "flexy-ai.com снова требует подтверждение email при входе — "
+                        "путь без почты не дает рабочий аккаунт, используйте "
+                        "temp-mail путь: mise run register_accounts"
+                    ) from e
+                logger.warning(f"вход после регистрации не удался ({mail}): {e}")
+                break
         if not token:
             continue
 

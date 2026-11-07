@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from src.config import ARM_FORM_FILL_DELAY_SECONDS
 from src.errors.email_errors import RegistrationEmailError
 from src.parse_files import get_arm_form_fields, get_arm_wp_nonce
+from src.waf_session import waf_request
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,7 +58,7 @@ def reinit_forms(session: requests.Session, page_html: str, headers: dict | None
     except ValueError:
         return None
 
-    response = session.post(AJAX_URL, headers=headers or {}, data={
+    response = waf_request(session, "POST", AJAX_URL, headers=headers or {}, data={
         "action": "arm_reinit_session_multiple_form",
         "form_key_arr": ",".join(found_keys),
         "_wpnonce": arm_wp_nonce
@@ -95,7 +96,7 @@ def reinit_key_for(data: dict, form_prefix: str) -> str | None:
 
 def check_field(session: requests.Session, headers: dict, field_name: str, value: str, nonce: str):
     logger.info(f"-> Проверка поля {field_name}: {value}")
-    response = session.post(AJAX_URL, headers=headers, data={
+    response = waf_request(session, "POST", AJAX_URL, headers=headers, data={
         "action": "arm_check_exist_field",
         "field": field_name,
         "value": value,
@@ -103,14 +104,16 @@ def check_field(session: requests.Session, headers: dict, field_name: str, value
     }, timeout=15)
     logger.info(f"Ответ сервера: {response.text[:200]}")
 
-def register_user(login, email, password):
-    session = requests.Session()
+def register_user(login, email, password, session: requests.Session | None = None):
+    session = session or requests.Session()
     # момент загрузки формы: anti-бот ARMember отклоняет сабмиты раньше
     # ARM_FORM_FILL_DELAY_SECONDS с загрузки страницы («Обнаружен спам»)
     started = time.monotonic()
 
     try:
-        main_page = session.get(BASE_URL, headers=HEADERS, timeout=15)
+        # 468 (челлендж SafeLine) обрабатывается внутри waf_request: куки
+        # получаются лениво при первом ответе WAF (ADR-004)
+        main_page = waf_request(session, "GET", BASE_URL, headers=HEADERS, timeout=15)
         main_page.raise_for_status()
         # поля формы регистрации после восстановления хостинга динамические
         # (arm_action=please-signup, referral_url, undefined, arm_nonce_check) —
@@ -171,7 +174,7 @@ def register_user(login, email, password):
     })
     payload[form_random_key] = ""
 
-    response = session.post(AJAX_URL, headers=HEADERS, data=payload, timeout=15)
+    response = waf_request(session, "POST", AJAX_URL, headers=HEADERS, data=payload, timeout=15)
     try:
         data = response.json()
     except ValueError:
