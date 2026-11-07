@@ -163,7 +163,7 @@ flowchart TB
 | Компонент | Модуль | Ответственность | Используют |
 |---|---|---|---|
 | **run_ui.py** | `scripts/run_ui.py` | Единое интерактивное меню (ADR-002): запуск бота, генераций, регистрации, статистика пула; валидация ввода, панели и спиннеры rich | generation, farm, run_bot, repository |
-| **run_bot.py** | `scripts/run_bot.py` | Хендлеры aiogram (`/start`, фото): скачивание фото под uuid-именем, запуск генерации через сервис в `asyncio.to_thread`, отправка результата | generation |
+| **run_bot.py** | `scripts/run_bot.py` | Хендлеры aiogram (`/start`, `/help`, `/context`, `/cancel`, фото): фото под uuid-именем (вне режима — стандартный промпт, в `/context` — по описанию пользователя через FSM), запуск генерации через сервис в `asyncio.to_thread`, отправка результата | generation |
 | **run_register_accounts.py** | `scripts/run_register_accounts.py` | CLI-обёртка фермы: argparse + логирование, вызов `farm.register_accounts(count)` | farm |
 | **run_register_accounts_no_email.py** | `scripts/run_register_accounts_no_email.py` | CLI регистрации без почты (ADR-003): argparse + вызов `farm.register_accounts_no_email(count)` | farm |
 | **run_generate_*.py** | `scripts/` | CLI-генерации txt2img / context2img без бота — тонкая обёртка над сервисом | generation |
@@ -183,7 +183,7 @@ flowchart TB
 
 **Генерация (пользователь → картинка):**
 
-1. `photo_handler` скачивает фото под uuid-именем и сразу отвечает пользователю
+1. `photo_handler` / `context_photo_handler` скачивает фото под uuid-именем и сразу отвечает пользователю (промпт: стандартный вне режима, описание пользователя — в режиме `/context`)
 2. `asyncio.to_thread(generation.context_to_image)` — генерация не блокирует бота
 3. `DB.get_account()` атомарно берёт свободный аккаунт (round-robin по `last_used`)
 4. `FlexyAiAPI.login()` → `set_api_key()` → `context_to_image()` (поллинг статуса ~30 сек)
